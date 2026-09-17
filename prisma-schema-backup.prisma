@@ -1,0 +1,1104 @@
+// 종합여행사 ERP 플랫폼 Database Schema
+// B2B/B2C 겸용, 더존 연동 준비, 관공서 문서 출력 지원
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// 1. 사용자 및 권한 관리 (Authentication & Authorization)
+// ============================================
+
+enum UserRole {
+  SUPER_ADMIN // 최고 관리자
+  ADMIN // 관리자
+  SALES // 영업사원
+  OPERATOR // 운영자/OP
+  DRIVER // 운전자/기사
+  GUIDE // 가이드
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String // bcrypt 해시
+  name         String
+  phone        String     @unique
+  role         UserRole   @default(ADMIN)
+  status       UserStatus @default(ACTIVE)
+  department   String?
+  employeeCode String?    @unique // 사원번호
+  avatar       String? // 프로필 이미지 URL
+
+  // CRM 관련
+  managedClients Client[] @relation("SalesManager")
+
+  // 배차 관련
+  driverProfile Driver? @relation("DriverProfile")
+  guideProfile  Guide?  @relation("GuideProfile")
+
+  // 시스템 관련
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("users")
+}
+
+// ============================================
+// 2. 고객/거래처 관리 (CRM)
+// ============================================
+
+enum ClientType {
+  INDIVIDUAL // 개인 고객
+  PUBLIC // 관공서
+  SCHOOL // 학교
+  CORPORATION // 기업
+}
+
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+  BLACKLIST
+}
+
+model Client {
+  id         String     @id @default(cuid())
+  clientType ClientType
+
+  // 개인 고객용
+  personalName String? // 개인 고객명
+
+  // 법인/기관용
+  officialName String? // 공식 명칭 (계약용)
+  documentName String? // 공문용 명칭 (관공서 제출용)
+  bizNumber    String? @unique // 사업자번호
+  ceoName      String? // 대표자명
+
+  // 연락처 정보
+  contactName  String? // 담당자명
+  contactPhone String? // 담당자 연락처
+  contactEmail String? // 담당자 이메일
+  address      String? // 주소
+
+  // 영업 관련
+  salesManagerId String?
+  salesManager   User?   @relation("SalesManager", fields: [salesManagerId], references: [id])
+  creditLimit    Int? // 여신 한도 (원)
+  currentBalance Int?    @default(0) // 현재 잔액 (원)
+
+  // 상태 및 메모
+  status ClientStatus @default(ACTIVE)
+  notes  String? // 비고
+
+  // 관공서용 추가 정보
+  organizationType String? // 기관 유형 (중앙부처/지자체/공공기관 등)
+  contractNumber   String? // 계약번호
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // 관계
+  contracts Contract[]
+  schedules Schedule[]
+
+  @@map("clients")
+}
+
+// ============================================
+// 3. 여행 상품 관리
+// ============================================
+
+enum ProductType {
+  PACKAGE_TOUR // 패키지 여행
+  GROUP_TOUR // 단체 관광
+  COMMUTE_BUS // 관공서/학교 출퇴근
+  CHARTER_BUS // 기업 전세
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  DRAFT
+}
+
+model TravelProduct {
+  id          String      @id @default(cuid())
+  productType ProductType
+  productName String
+  productCode String      @unique // 상품 코드
+  description String?
+
+  // 가격 정보
+  basePrice       Int // 기본 요금 (원)
+  seasonalPricing String? // JSON: 시즌별 가격 설정
+
+  // 옵션 상품
+  options String? // JSON: 옵션 상품 목록
+
+  // 상세 정보
+  duration        Int? // 소요 시간 (시간)
+  minParticipants Int? // 최소 인원
+  maxParticipants Int? // 최대 인원
+  region          String? // 지역
+
+  // 상태
+  status ProductStatus @default(ACTIVE)
+
+  // 문서 템플릿 (관공서용)
+  standardTemplateId String? // 표준 문서 템플릿 ID
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // 관계
+  schedules Schedule[]
+  contracts Contract[]
+
+  @@map("travel_products")
+}
+
+// ============================================
+// 4. 일정 관리 (Schedule)
+// ============================================
+
+enum ScheduleStatus {
+  PLANNED // 계획 중
+  CONFIRMED // 확정
+  IN_PROGRESS // 진행 중
+  COMPLETED // 완료
+  CANCELLED // 취소
+}
+
+model Schedule {
+  id        String        @id @default(cuid())
+  productId String
+  product   TravelProduct @relation(fields: [productId], references: [id])
+
+  // 기본 일정
+  startDate DateTime
+  endDate   DateTime
+  totalDays Int      @default(1)
+  startTime String? // 시작 시간 (HH:mm)
+  endTime   String? // 종료 시간 (HH:mm)
+
+  // 출발/도착 정보
+  departureLocation String?
+  arrivalLocation   String?
+
+  // 계약 정보
+  contractId String?
+  contract   Contract? @relation(fields: [contractId], references: [id])
+
+  // 고객 정보
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id])
+
+  // 인원 정보
+  participants Int @default(0) // 전체 인원
+  adultCount   Int @default(0)
+  childCount   Int @default(0)
+
+  // 상태 및 비고
+  status         ScheduleStatus @default(PLANNED)
+  remark         String?
+  specialRequest String? // 특이사항
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // 관계
+  dispatches Dispatch[]
+
+  @@map("schedules")
+}
+
+// ============================================
+// 5. 계약 관리 (Contract)
+// ============================================
+
+enum ContractStatus {
+  DRAFT // 초안
+  PENDING // 승인 대기
+  APPROVED // 승인
+  ACTIVE // 진행 중
+  COMPLETED // 완료
+  CANCELLED // 취소
+}
+
+model Contract {
+  id             String        @id @default(cuid())
+  contractNumber String        @unique // 계약번호
+  productId      String
+  product        TravelProduct @relation(fields: [productId], references: [id])
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id])
+
+  // 날짜 정보
+  contractDate DateTime @default(now())
+  startDate    DateTime
+  endDate      DateTime
+
+  // 금액 정보
+  totalAmount   Int // 계약 총액 (원)
+  depositAmount Int? // 계약금 (원)
+  depositPaid   Int  @default(0) // 계약금 납부액
+  balancePaid   Int  @default(0) // 잔금 납부액
+
+  // 상세 항목 (JSON)
+  items String? // JSON: 항목별 금액 내역
+
+  // 검적/계약 관련
+  quotedBy   String? // 영업사원 ID (User)
+  approvedBy String? // 승인자 ID (User)
+
+  // 상태
+  status ContractStatus @default(DRAFT)
+  notes  String? // 비고
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // 관계
+  schedules         Schedule[]
+  accountingEntries AccountingEntry[]
+
+  @@map("contracts")
+}
+
+// ============================================
+// 6. 차량 관리 (Vehicle)
+// ============================================
+
+enum VehicleOwnership {
+  OWN // 자차
+  EXTERNAL // 외주
+}
+
+enum VehicleType {
+  MINIBUS // 미디버스 (11~15인승)
+  MIDBUS // 중형버스 (25인승)
+  LARGE_BUS // 대형버스 (45인승)
+  LIMOUSINE // 리무진 (7~9인승)
+}
+
+enum VehicleStatus {
+  ACTIVE
+  MAINTENANCE
+  RETIRED
+}
+
+model Vehicle {
+  id          String      @id @default(cuid())
+  vehicleType VehicleType
+  plateNumber String      @unique // 차량번호
+  seats       Int // 좌석 수
+
+  // 소유 정보
+  ownership       VehicleOwnership @default(OWN)
+  externalCompany String? // 외주 업체명
+  externalCost    Int? // 외주 비용 (원/일)
+
+  // 운행 제한
+  maxDailyHours  Int?    @default(10) // 일일 최대 운행 시간
+  allowedRegions String? // JSON: 허용 지역
+
+  // 상태
+  status VehicleStatus @default(ACTIVE)
+  notes  String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // 관계
+  dispatches Dispatch[]
+
+  @@map("vehicles")
+}
+
+// ============================================
+// 7. 기사 관리 (Driver)
+// ============================================
+
+enum DriverLicenseType {
+  LARGE // 대형
+  LARGE_SPECIAL // 대형특수
+  TRAILER // 견인
+}
+
+enum DriverStatus {
+  AVAILABLE // 출근 가능
+  ON_DUTY // 운행 중
+  REST // 휴식 중
+  LEAVE // 휴가
+  RETIRED // 퇴사
+}
+
+model Driver {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation("DriverProfile", fields: [userId], references: [id])
+
+  // 면허 정보
+  licenseNumber String            @unique // 운전면허 번호
+  licenseType   DriverLicenseType
+  licenseExpiry DateTime // 면허 만료일
+
+  // 근무 정보
+  status          DriverStatus @default(AVAILABLE)
+  availableRegion String? // 활동 지역
+
+  // 근무 조건
+  overtimeAllowed Boolean @default(false) // 야근 허용 여부
+  maxDailyHours   Int?    @default(10) // 일일 최대 근무 시간
+  weeklyRestDays  String? // JSON: 주휴일 설정
+
+  // 성향 정보
+  preferredRoutes String? // JSON: 선호 노선
+  excludedRoutes  String? // JSON: 제외 노선
+
+  // 외주 정보
+  isExternal      Boolean @default(false)
+  externalCompany String? // 소속 외주업체
+
+  // 민원/실적
+  complaintCount Int    @default(0)
+  warningCount   Int    @default(0)
+  rating         Float? // 평점 (1~5)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // 관계
+  dispatches        Dispatch[]
+  workLogs          DriverWorkLog[]
+  driverSettlements Settlement[]    @relation("DriverSettlement")
+
+  @@map("drivers")
+}
+
+// ============================================
+// 8. 가이드 관리 (Guide)
+// ============================================
+
+enum GuideStatus {
+  AVAILABLE
+  ON_TOUR
+  REST
+  LEAVE
+  RETIRED
+}
+
+model Guide {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation("GuideProfile", fields: [userId], references: [id])
+
+  // 자격 정보
+  licenseNumber   String? @unique // 가이드 자격 번호
+  languages       String? // JSON: 가능 언어
+  specializations String? // JSON: 전문 분야
+
+  // 근무 정보
+  status          GuideStatus @default(AVAILABLE)
+  availableRegion String?
+
+  // 성향 정보
+  preferredTypes String? // JSON: 선호 상품 유형
+  excludedTypes  String? // JSON: 제외 상품 유형
+
+  // 실적
+  tourCount Int    @default(0)
+  rating    Float?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // 관계
+  dispatches       Dispatch[]
+  guideSettlements Settlement[] @relation("GuideSettlement")
+
+  @@map("guides")
+}
+
+// ============================================
+// 9. 배차 관리 (Dispatch)
+// ============================================
+
+enum DispatchStatus {
+  PENDING // 대기
+  CONFIRMED // 확정
+  IN_PROGRESS // 운행 중
+  COMPLETED // 완료
+  CANCELLED // 취소
+  FAILED // 실패
+}
+
+model Dispatch {
+  id String @id @default(cuid())
+
+  // 연결 정보
+  scheduleId String
+  schedule   Schedule @relation(fields: [scheduleId], references: [id])
+
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id])
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  guideId String?
+  guide   Guide?  @relation(fields: [guideId], references: [id])
+
+  // 시간 정보
+  scheduledStart DateTime // 예정 출발 시간
+  scheduledEnd   DateTime // 예정 도착 시간
+  actualStart    DateTime? // 실제 출발 시간
+  actualEnd      DateTime? // 실제 도착 시간
+
+  // 노선 정보
+  departureLocation String?
+  arrivalLocation   String?
+  route             String? // JSON: 상세 경로
+
+  // 특이사항
+  specialConditions String? // JSON: 특별 조건 (위험물 운송, VIP 등)
+  notes             String?
+
+  // 운행 이슈
+  issues String? // JSON: 운행 이슈 기록
+
+  // 자동 배차 정보
+  autoRecommended     Boolean @default(false) // 자동 추천 여부
+  recommendationScore Int? // 추천 점수
+  warnings            String? // JSON: 경고 메시지
+
+  // 상태
+  status DispatchStatus @default(PENDING)
+
+  // 관리자 기록 (강제 배차 등)
+  forcedBy     String? // User ID
+  forcedReason String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // 관계
+  workLogs DriverWorkLog[]
+
+  @@map("dispatches")
+}
+
+// ============================================
+// 10. 기사 근무 기록 (Driver Work Log)
+// ============================================
+
+enum WorkLogStatus {
+  STARTED // 운행 시작
+  ENDED // 운행 종료
+  PAUSED // 휴식 중
+}
+
+model DriverWorkLog {
+  id String @id @default(cuid())
+
+  dispatchId String
+  dispatch   Dispatch @relation(fields: [dispatchId], references: [id])
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  // 시간 기록
+  startTime      DateTime
+  endTime        DateTime?
+  breakStartTime DateTime?
+  breakEndTime   DateTime?
+
+  // 운행 정보
+  startOdometer Int? // 시작 주행거리 (km)
+  endOdometer   Int? // 종료 주행거리 (km)
+
+  // 상태
+  status WorkLogStatus @default(STARTED)
+
+  // 증빙 자료
+  photos String? // JSON: 사진 URL 목록
+
+  // 이슈/메모
+  issues String? // JSON: 운행 이슈
+  notes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("driver_work_logs")
+}
+
+// ============================================
+// 11. 배차 규칙 (Dispatch Rules)
+// ============================================
+
+enum RuleType {
+  REST_HOURS // 법정 휴식시간
+  MAX_DAILY_HOURS // 일일 최대 근무시간
+  CONSECUTIVE_DAYS // 연속 근무일수
+  REGION_MATCH // 지역 매칭
+  PREFERENCE // 선호도
+}
+
+model DispatchRule {
+  id       String   @id @default(cuid())
+  ruleType RuleType
+
+  // 규칙명과 설명
+  name        String
+  description String?
+
+  // 규칙 조건 (JSON)
+  conditions String // JSON: 세부 조건
+
+  // 가중치
+  weight Int @default(10) // 배차 점수 계산 시 가중치
+
+  // 활성화
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("dispatch_rules")
+}
+
+// ============================================
+// 12. 정산/회계 관리 (Accounting)
+// ============================================
+
+enum EntryType {
+  SALES // 매출
+  EXPENSE // 비용
+  RECEIVABLE // 채권
+  PAYABLE // 채무
+  DEPOSIT // 예치금
+  WITHDRAWAL // 출금
+}
+
+enum AccountingStatus {
+  PENDING // 대기
+  APPROVED // 승인
+  COMPLETED // 완료
+  EXPORTED // 더존 전송 완료
+  FAILED // 실패
+}
+
+model AccountingEntry {
+  id String @id @default(cuid())
+
+  // 분개 번호
+  entryNumber String    @unique
+  entryDate   DateTime // 분개일
+  entryType   EntryType
+
+  // 계정 정보
+  accountCode    String // 계정 코드
+  accountName    String // 계정명
+  subAccountCode String? // 부계정 코드
+
+  // 금액 (차변/대변)
+  debit  Int @default(0) // 차변 (원)
+  credit Int @default(0) // 대변 (원)
+
+  // 거래 내용
+  description     String
+  referenceNumber String? // 참조 번호
+
+  // 연결 정보
+  contractId   String?
+  contract     Contract? @relation(fields: [contractId], references: [id])
+  dispatchId   String?
+  settlementId String? // 정산 ID
+
+  // 더존 연동
+  dzExportReady  Boolean   @default(false)
+  dzExportedAt   DateTime?
+  dzExportStatus String?
+
+  // 승인
+  approvedBy String? // User ID
+  approvedAt DateTime?
+
+  // 상태
+  status AccountingStatus @default(PENDING)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("accounting_entries")
+}
+
+// ============================================
+// 13. 전표 관리 (Accounting Slip)
+// ============================================
+
+enum SlipStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  POSTED
+}
+
+model AccountingSlip {
+  id         String   @id @default(cuid())
+  slipNumber String   @unique // 전표 번호
+  slipDate   DateTime // 전표일
+  slipType   String // 전표 유형 (수입/지출/대체)
+
+  // 금액 합계
+  totalDebit  Int @default(0) // 차변 합계
+  totalCredit Int @default(0) // 대변 합계
+
+  // 설명
+  description String?
+  remark      String?
+
+  // 관리 정보
+  createdBy  String? // User ID
+  department String?
+
+  // 승인
+  approvedBy String?
+  approvedAt DateTime?
+
+  // 더존
+  dzSlipNumber String? // 더존 전표 번호
+  dzExportedAt DateTime?
+
+  // 상태
+  status SlipStatus @default(DRAFT)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("accounting_slips")
+}
+
+// ============================================
+// 14. 정산 관리 (Settlement)
+// ============================================
+
+enum SettlementType {
+  DRIVER // 기사
+  GUIDE // 가이드
+  EXTERNAL_COMPANY // 외주업체
+}
+
+enum SettlementStatus {
+  PENDING // 대기
+  CALCULATED // 계산 완료
+  APPROVED // 승인
+  PAID // 지급 완료
+  CANCELLED // 취소
+}
+
+model Settlement {
+  id                String   @id @default(cuid())
+  settlementNumber  String   @unique // 정산 번호
+  settlementDate    DateTime // 정산 기간 시작
+  settlementEndDate DateTime // 정산 기간 종료
+
+  // 정산 대상
+  settlementType SettlementType
+  targetId       String // Driver/Guide/ExternalCompany ID
+  targetName     String // 대상명
+
+  // 직접 관계 (선택적 사용)
+  driverId String? @unique
+  driver   Driver? @relation("DriverSettlement", fields: [driverId], references: [id])
+  guideId  String? @unique
+  guide    Guide?  @relation("GuideSettlement", fields: [guideId], references: [id])
+
+  // 금액
+  baseAmount      Int @default(0) // 기본 금액
+  overtimeAmount  Int @default(0) // 야근 수당
+  bonusAmount     Int @default(0) // 상여금
+  deductionAmount Int @default(0) // 공제액
+  totalAmount     Int @default(0) // 최종 지급액
+
+  // 세부 내역 (JSON)
+  details String? // JSON: 운행 내역별 상세
+
+  // 지급 정보
+  paidAt        DateTime? // 지급일
+  paymentMethod String? // 지급 방법
+
+  // 승인
+  approvedBy String?
+  approvedAt DateTime?
+
+  // 상태
+  status SettlementStatus @default(PENDING)
+  notes  String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("settlements")
+}
+
+// ============================================
+// 15. 엑셀/한글 데이터 이관 (Raw Import)
+// ============================================
+
+enum ImportFileType {
+  EXCEL
+  HWP
+  PDF
+}
+
+enum ImportStatus {
+  PENDING
+  PARSING
+  COMPLETED
+  FAILED
+}
+
+model RawImportFile {
+  id String @id @default(cuid())
+
+  // 파일 정보
+  fileType         ImportFileType
+  originalFilename String
+  filePath         String // 저장 경로
+  fileSize         Int // 파일 크기 (bytes)
+
+  // 이관 정보
+  uploadedBy String // User ID
+  uploadedAt DateTime @default(now())
+
+  // 파싱 상태
+  parsedStatus ImportStatus @default(PENDING)
+  parsedAt     DateTime?
+  parseMessage String? // 파싱 결과 메시지
+
+  // 매핑 정보
+  mappedTarget  String? // 타겟 테이블명
+  mappingConfig String? // JSON: 매핑 설정
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 관계
+  rows RawImportRow[]
+
+  @@map("raw_import_files")
+}
+
+model RawImportRow {
+  id String @id @default(cuid())
+
+  fileId String
+  file   RawImportFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  // 행 정보
+  sheetName String?
+  rowIndex  Int // 원본 행 번호
+
+  // 원본 데이터 (JSON - 절대 삭제 금지)
+  rawJson String // 원본 행 데이터
+
+  // 매핑 정보
+  mappedToTable String? // 매핑된 테이블명
+  mappedToId    String? // 매핑된 레코드 ID
+  mappedStatus  String? // 매핑 상태
+
+  // 에러 정보
+  errorMessage String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("raw_import_rows")
+}
+
+// ============================================
+// 16. 관공서 문서 템플릿 (Document Templates)
+// ============================================
+
+enum InstitutionType {
+  CENTRAL_GOV // 중앙부처
+  LOCAL_GOV // 지자체
+  PUBLIC_AGENCY // 공공기관
+  SCHOOL // 학교
+  MILITARY // 군부대
+}
+
+enum DocumentType {
+  CONTRACT // 계약서
+  CERTIFICATE // 확인서
+  OPERATION_LOG // 운행일지
+  ESTIMATE // 견적서
+  RECEIPT // 영수증
+}
+
+model DocumentTemplate {
+  id String @id @default(cuid())
+
+  // 템플릿 정보
+  institutionType InstitutionType
+  documentType    DocumentType
+  templateName    String
+  version         String          @default("1.0")
+
+  // 파일 정보
+  templatePath   String // 템플릿 파일 경로 (HWP/PDF)
+  templateFormat String // HWP/PDF
+
+  // 필드 매핑 (JSON)
+  fieldMapping String // JSON: DB 필드 ↔ 문서 필드 매핑
+
+  // 좌표 정보 (관공서 출력용)
+  coordinateMapping String? // JSON: 필드별 좌표
+
+  // 메타데이터
+  description String?
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 관계
+  fields DocumentField[]
+
+  @@map("document_templates")
+}
+
+model DocumentField {
+  id String @id @default(cuid())
+
+  templateId String
+  template   DocumentTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  // 필드 정보
+  fieldName String // 필드명
+  fieldCode String @unique // 필드 코드
+  fieldType String // TEXT/DATE/AMOUNT 등
+
+  // 위치 정보 (좌표 기반 출력용)
+  x      Float?
+  y      Float?
+  width  Float?
+  height Float?
+
+  // 데이터 소스
+  sourceTable       String? // 데이터 소스 테이블
+  sourceField       String? // 데이터 소스 필드
+  transformFunction String? // 변환 함수 (한글 변환 등)
+
+  // 필수 여부
+  isRequired Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("document_fields")
+}
+
+// 문서 출력 이력
+model DocumentOutputHistory {
+  id String @id @default(cuid())
+
+  templateId String
+  targetId   String // 출력 대상 ID (Contract/Dispatch 등)
+  targetType String // 출력 대상 타입
+
+  // 출력 파일
+  outputPath   String // 출력 파일 경로
+  outputFormat String // PDF/HWP
+
+  // 데이터 스냅샷 (감사용)
+  dataSnapshot String // JSON: 출력 당시 데이터
+
+  // 출력 정보
+  printedBy String // User ID
+  printedAt DateTime @default(now())
+
+  // 관공서 제출용
+  isOfficialDoc  Boolean @default(false)
+  officialDocRef String? // 관공서 제출 번호
+
+  createdAt DateTime @default(now())
+
+  @@map("document_output_history")
+}
+
+// ============================================
+// 17. 알림 시스템 (Notification)
+// ============================================
+
+enum NotificationChannel {
+  PUSH
+  SMS
+  EMAIL
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+model NotificationQueue {
+  id String @id @default(cuid())
+
+  // 대상 정보
+  targetType  String // driver/guide/staff
+  targetId    String
+  targetPhone String?
+  targetEmail String?
+
+  // 알림 정보
+  channel NotificationChannel
+  title   String
+  message String
+  data    String? // JSON: 추가 데이터
+
+  // 예약 발송
+  scheduledAt DateTime?
+  sentAt      DateTime?
+
+  // 상태
+  status       NotificationStatus @default(PENDING)
+  errorMessage String?
+  retryCount   Int                @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("notification_queue")
+}
+
+// ============================================
+// 18. 감사 로그 (Audit Log)
+// ============================================
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  VIEW
+  EXPORT
+  APPROVE
+  REJECT
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+
+  // 사용자 정보
+  userId   String
+  userName String?
+  userRole UserRole?
+
+  // 작업 정보
+  action    AuditAction
+  tableName String
+  recordId  String?
+
+  // 변경 내용
+  oldValue String? // JSON: 변경 전 값
+  newValue String? // JSON: 변경 후 값
+
+  // 추가 정보
+  ipAddress   String?
+  userAgent   String?
+  description String?
+
+  createdAt DateTime @default(now())
+
+  @@map("audit_logs")
+}
+
+// ============================================
+// 19. 더존 연동 로그 (Douzone Export Log)
+// ============================================
+
+enum ExportStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  RETRYING
+}
+
+model DouzoneExportLog {
+  id String @id @default(cuid())
+
+  // 대상 정보
+  targetType String // slip/entry 등
+  targetId   String
+
+  // 요청 정보
+  requestPayload  String // JSON: 요청 데이터
+  responsePayload String? // JSON: 응답 데이터
+
+  // 상태
+  status       ExportStatus @default(PENDING)
+  errorMessage String?
+
+  // 타임스탬프
+  requestedAt DateTime  @default(now())
+  completedAt DateTime?
+
+  // 재시도
+  retryCount  Int       @default(0)
+  lastRetryAt DateTime?
+
+  @@map("douzone_export_logs")
+}
+
+// ============================================
+// 20. 통계/리포트 캐시 (Stats Cache)
+// ============================================
+
+model StatsCache {
+  id String @id @default(cuid())
+
+  // 캐시 키
+  cacheKey  String @unique
+  cacheType String // daily_sales/monthly_stats 등
+
+  // 데이터 (JSON)
+  data      String
+  dataCount Int    @default(0)
+
+  // 유효 기간
+  validUntil DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("stats_cache")
+}
