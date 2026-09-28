@@ -15,7 +15,7 @@
 npm install
 npm run db:push      # 스키마 반영
 npm run db:seed      # 시드 데이터 (admin@example.com / admin1234)
-npm run dev          # http://localhost:3000
+npm run dev          # http://localhost:3000 (개발) / 운영: http://rustkorea.cloud:3400
 ```
 
 ## 주요 기능

@@ -1,6 +1,8 @@
 import { prisma } from "./prisma";
 import { getSettings } from "./settings";
 import { featureEnabled } from "./features";
+import { enqueueInApp } from "./notify-worker";
+import { SECURITY_POLICY, isValidPhone } from "./security-policy";
 
 export async function notifyDispatchCreated(dispatch: any) {
   const settings = await getSettings();
@@ -27,13 +29,23 @@ export async function notifyDispatchCreated(dispatch: any) {
   const message = `[배차 안내] ${fmt(dispatch.scheduledStart)} 출발 배차가 배정되었습니다. 차량/노선은 앱에서 확인해주세요.`;
 
   const targets: { userId: string; phone: string; name: string; targetType: string }[] = [];
-  if (driver?.user?.phone) {
-    targets.push({ userId: driver.userId, phone: driver.user.phone, name: driver.user.name ?? "기사", targetType: "driver" });
+  if (driver?.user?.phone && isValidPhone(driver.user.phone)) {
+    targets.push({ userId: driver.userId, phone: driver.user.phone.trim(), name: driver.user.name ?? "기사", targetType: "driver" });
   }
-  if (guide?.user?.phone) {
-    targets.push({ userId: guide.userId, phone: guide.user.phone, name: guide.user.name ?? "가이드", targetType: "guide" });
+  if (guide?.user?.phone && isValidPhone(guide.user.phone)) {
+    targets.push({ userId: guide.userId, phone: guide.user.phone.trim(), name: guide.user.name ?? "가이드", targetType: "guide" });
   }
   if (targets.length === 0) return;
+
+  for (const t of targets) {
+    await enqueueInApp({
+      targetType: t.targetType,
+      targetId: t.userId,
+      title: "새 배차 안내",
+      message,
+      data: JSON.stringify({ dispatchId: dispatch.id }),
+    });
+  }
 
   const gatewayUrl: string = settings["sms.gatewayUrl"] ?? "";
   const apiKey: string = settings["sms.apiKey"] ?? "";
@@ -61,7 +73,7 @@ export async function notifyDispatchCreated(dispatch: any) {
         .replace("{phone}", encodeURIComponent(t.phone))
         .replace("{message}", encodeURIComponent(message))
         .replace("{apiKey}", encodeURIComponent(apiKey));
-      fetch(url).catch(() => {
+      fetch(url, { signal: AbortSignal.timeout(SECURITY_POLICY.notify.fetchTimeoutMs) }).catch(() => {
         // 게이트웨이 전송 실패는 큐에 남으므로 무시
       });
     }

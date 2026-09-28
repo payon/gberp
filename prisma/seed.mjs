@@ -4,7 +4,9 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  const password = bcrypt.hashSync("admin1234", 10);
+  const seedPassword = process.env.SEED_PASSWORD || "admin1234";
+  const seedRounds = Number(process.env.SEED_BCRYPT_ROUNDS) || 12;
+  const password = bcrypt.hashSync(seedPassword, seedRounds);
 
   const existing = await prisma.user.findFirst();
   if (existing) {
@@ -97,7 +99,7 @@ async function main() {
     },
   });
 
-  console.log("✅ 사용자 생성 완료 (비밀번호: admin1234)");
+  console.log("✅ 사용자 생성 완료 (비밀번호: SEED_PASSWORD 환경변수 또는 기본 admin1234 — 운영 시 반드시 변경)");
 
   // ============ Drivers / Guides ============
   const driver1 = await prisma.driver.create({
@@ -459,7 +461,7 @@ async function main() {
   });
 
   console.log("🎉 시드 데이터 생성이 완료되었습니다.");
-  console.log("로그인: admin@example.com / admin1234 (최고관리자)");
+  console.log("로그인: admin@example.com / (SEED_PASSWORD 또는 admin1234, 최고관리자)");
 }
 
 main()

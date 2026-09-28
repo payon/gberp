@@ -42,6 +42,26 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // SMS 게이트웨이 (smsNotify 켜고 배차 생성 시 발송)
   "sms.gatewayUrl": "",
   "sms.apiKey": "",
+
+  // 더존 연동 (수동 전송 잡이 사용, URL 비어 있으면 PENDING 적재만)
+  "douzone.endpointUrl": "",
+  "douzone.apiKey": "",
+
+  // 이메일 알림 (URL 비어 있으면 큐 적재만)
+  "email.gatewayUrl": "",
+  "email.apiKey": "",
+  "email.from": "",
+
+  // PWA 앱 아이콘/매니페스트 (설정 > 앱 아이콘 탭에서 관리)
+  "pwa.name": "",
+  "pwa.shortName": "",
+  "pwa.themeColor": "#0a0a0a",
+  "pwa.backgroundColor": "#ffffff",
+  "pwa.iconPath": "",
+  "pwa.iconUpdatedAt": "",
+
+  // RBAC 메뉴 오버라이드 (JSON: { ROLE: { "/dashboard/clients": false } }, SA 전용 /api/rbac)
+  "rbac.overrides": "{}",
 };
 
 export type Settings = Record<string, string>;

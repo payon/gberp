@@ -4,7 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
 import { MobileNav } from "@/components/mobile-nav";
-import { menuForRole } from "@/lib/permissions";
+import { menuForRoleWithOverrides, parseRbacOverrides } from "@/lib/app-menus";
+import { getSettings, setting } from "@/lib/settings";
 import type { UserRole } from "@prisma/client";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -18,10 +19,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
     redirect("/driver");
   }
 
+  const settings = await getSettings();
+  const overrides = parseRbacOverrides(setting(settings, "rbac.overrides"));
+
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar
-        items={menuForRole(role)}
+        items={menuForRoleWithOverrides(role, overrides)}
         user={{ name: session.user.name, email: session.user.email, role }}
       />
       <div className="flex min-w-0 flex-1 flex-col">

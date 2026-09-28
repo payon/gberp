@@ -1,6 +1,6 @@
 # Program — 프로그램 구성 및 모듈 개요
 
-> 버전: v0.2.0 · 갱신일: 2026-09-17
+> 버전: v0.2.1 · 갱신일: 2026-09-28
 
 ## 1. 런타임 스택
 
@@ -51,20 +51,25 @@ src/
 
 | 파일 | 책임 |
 |---|---|
-| `auth.ts` | NextAuth 설정, 로그인 실패 잠금, SessionUser 타입 |
-| `permissions.ts` | ROLE_LABELS/MENU, hasRole, menuForRole, canAccessModule |
-| `resources.ts` | **리소스 정의(ResourceDef)** + 라벨 맵 + ConflictError + 각종 serialize |
-| `crud.ts` | 공통 CRUD 핸들러(handleList/Create/Update/Delete), parseValue/buildData/validateRequired |
+| `auth.ts` | NextAuth 설정, 로그인 실패 잠금(DB), SessionUser 타입 (임계값은 `security-policy.ts`) |
+| `permissions.ts` | ROLE_LABELS/MENU, hasRole, menuForRole, canAccessModule(관리자 기사앱 미리보기 허용) |
+| `resources.ts` | **리소스 정의(ResourceDef)** + 라벨 맵 + ConflictError + 각종 serialize + 구간겹침 가드 |
+| `crud.ts` | 공통 CRUD 핸들러(handleList/Create/Update/Delete), 페이지네이션, parseValue/buildData/validateRequired(createOnly 생성 포함) |
+| `security-policy.ts` | 보안·무결성 중앙 상수(인증/페이징/업로드/타임아웃/재시도) + `redactSensitiveDeep/isValidPhone/isValidEmail` |
+| `sequence.ts` | 일자별 순번 재시도 생성(`nextDailyNumber`) |
 | `features.ts` | FeatureKey, FEATURE_DEFS, featureEnabled/enabledFeatures |
 | `settings.ts` | DEFAULT_SETTINGS, getSettings(캐시), saveSettings(whitelist), 휴일/날짜 유틸 |
 | `holidays.ts` | 휴일 목록 파싱/검증 |
 | `recommend.ts` | 반자동 배차 추천엔진 + createRecommendedDispatch |
 | `notify.ts` | 배차 생성 SMS 발송 큐/게이트웨이 호출 |
-| `audit.ts` | auditLog, logCreate/Update/SoftDelete |
+| `audit.ts` | auditLog(민감값 마스킹), logCreate/Update/SoftDelete, verifyAuditChain |
+| `app-icons.ts` | PWA 아이콘 세트 생성(sharp, 8종+maskable+iOS+파비콘) |
+| `app-menus.ts` | 기사/가이드 앱 메뉴 분리 + RBAC 오버라이드 해석(`isMenuAllowed/menuForRoleWithOverrides`) |
 | `xlsx.ts` | 엑셀 다운로드/텍스트 안전 처리 |
 | `push.ts` / `push-client.ts` | 웹 푸시 서버/클라이언트 |
 | `tts.ts` / `speech.ts` | TTS 프라임/큐 재생, 배차 음성 문장 생성 |
-| `uploads.ts` | 로고·규격서 저장/삭제 |
+| `email.ts` / `notify-worker.ts` / `douzone.ts` / `raw-import.ts` / `stats-cache.ts` / `documents.ts` | 이메일·알림재시도·더존CSV·원본파싱·통계캐시·문서병합 |
+| `uploads.ts` | 로고·규격서 저장/삭제 + 관리자 게이트 |
 | `utils.ts` / `amount.ts` | 날짜·통화 포맷 |
 | `prisma.ts` | Prisma 클라이언트 싱글턴 |
 | `revalidate.ts` | 설정 변경 시 리밸리데이션 |

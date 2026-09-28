@@ -6,8 +6,8 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:3000",
-    "beforeBuildCommand": "",
-    "frontendDist": "../out"
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../public"
   },
   "app": {
     "windows": [
@@ -29,6 +29,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "android": { "minSdkVersion": 24 },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

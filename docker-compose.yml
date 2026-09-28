@@ -1,0 +1,43 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gberp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gberp_pw_change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-gberp}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-gberp} -d $${POSTGRES_DB:-gberp}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3400:3000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-gberp}:${POSTGRES_PASSWORD:-gberp_pw_change_me}@db:5432/${POSTGRES_DB:-gberp}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://rustkorea.cloud:3400}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change-me-in-production}
+      SEED_ON_BOOT: ${SEED_ON_BOOT:-true}
+      SEED_PASSWORD: ${SEED_PASSWORD:-}
+      SEED_BCRYPT_ROUNDS: ${SEED_BCRYPT_ROUNDS:-12}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+volumes:
+  pgdata:

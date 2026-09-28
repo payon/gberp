@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -736,10 +736,10 @@ model Settlement {
   targetId       String // Driver/Guide/ExternalCompany ID
   targetName     String // 대상명
 
-  // 직접 관계 (선택적 사용)
-  driverId String? @unique
+  // 직접 관계 (선택적 사용, 다건 허용 — targetId/targetName이 정식 식별자)
+  driverId String?
   driver   Driver? @relation("DriverSettlement", fields: [driverId], references: [id])
-  guideId  String? @unique
+  guideId  String?
   guide    Guide?  @relation("GuideSettlement", fields: [guideId], references: [id])
 
   // 금액
@@ -768,6 +768,7 @@ model Settlement {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  @@index([targetId])
   @@map("settlements")
 }
 
@@ -1073,9 +1074,26 @@ model AuditLog {
   userAgent   String?
   description String?
 
+  // 무결성 체인 (entryHash = sha256(prevHash + 정준 페이로드))
+  prevHash  String?
+  entryHash String?
+
   createdAt DateTime @default(now())
 
   @@map("audit_logs")
+}
+
+// 로그인 시도 (브루트포스 잠금, DB 기반 — 다중 인스턴스 대응)
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  fails     Int      @default(0)
+  firstFail DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("login_attempts")
 }
 
 // ============================================

@@ -10,32 +10,38 @@ export async function generateMetadata(): Promise<Metadata> {
   const settings = await getSettings();
   const name = companyName(settings);
   const logoPath = setting(settings, "company.logoPath");
+  const pwaIcon = setting(settings, "pwa.iconPath").trim();
+  const appName = setting(settings, "pwa.name").trim() || `${name} ERP`;
+  const shortName = setting(settings, "pwa.shortName").trim() || `${name}ERP`;
 
-  const icons: Metadata["icons"] = logoPath
-    ? { icon: logoPath, apple: "/icons/apple-touch-icon.png" }
-    : { icon: "/icons/icon-192.png", apple: "/icons/apple-touch-icon.png" };
+  const iconSrc = pwaIcon || logoPath || "/icons/icon-192.png";
+  const icons: Metadata["icons"] = { icon: iconSrc, apple: "/icons/apple-touch-icon.png" };
 
   return {
-    title: `${name} ERP 시스템`,
-    description: `${name} 통합 업무관리 플랫폼 (배차/정산/회계/문서) — 기사님 앱, PWA, 음성 안내`,
+    title: `${appName} 시스템`,
+    description: `${appName} 통합 업무관리 플랫폼 (배차/정산/회계/문서) — 기사·가이드 앱, PWA, 음성 안내`,
     manifest: "/manifest.webmanifest",
-    applicationName: `${name} ERP`,
+    applicationName: appName,
     appleWebApp: {
       capable: true,
-      title: `${name}ERP`,
+      title: shortName,
       statusBarStyle: "black-translucent",
     },
     icons,
   };
 }
 
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  maximumScale: 1,
-  viewportFit: "cover",
-  themeColor: "#0a0a0a",
-};
+export async function generateViewport(): Promise<Viewport> {
+  const settings = await getSettings();
+  const themeColor = setting(settings, "pwa.themeColor").trim() || "#0a0a0a";
+  return {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 1,
+    viewportFit: "cover",
+    themeColor,
+  };
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

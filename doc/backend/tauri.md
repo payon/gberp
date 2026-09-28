@@ -1,19 +1,21 @@
 # Tauri — 데스크톱/Android 앱 패키징 가이드
 
-> 버전: v0.2.0 · 갱신일: 2026-09-17
+> 버전: v0.2.1 · 갱신일: 2026-09-28
 > 대상: TWA 대신 Tauri 기반으로 운영 앱(기사/가이드/관리자용)을 만들고, Android Studio로 빌드·배포하는 방법.
 
-## 1. 현재 상태 진단 (2026-09-17 확인)
+## 1. 현재 상태 진단 (2026-09-23 확인)
 
 | 항목 | 상태 | 내용 |
 |---|---|---|
 | `src-tauri/` | ✅ 있음 | Tauri **v2** (`tauri = "2"`), `identifier: com.globe.travelerp` |
-| `src-tauri/src/main.rs` | ✅ 있음 | 데스크톱/모바일 공통 진입점(`app_info` 커맨드) |
-| `@tauri-apps/cli` | ❌ **없음** | `npm run tauri`는 현재 실패 → **먼저 설치 필요** (섹션 3) |
-| `src-tauri/gen/android` | ❌ 없음 | `tauri android init` 한 번도 안 함 |
-| Rust/Cargo | ✅ 있음 | rustc 1.98.1 (Windows host) |
-| Android Studio / SDK | ❌ 미설치 | 본 가이드 2장 참고해 설치 |
-| `tauri.conf.json` | ⚠️ 수정 필요 | `frontendDist: "../out"`은 실제 산출물 없음, 모바일 URL 정책 결정 필요 |
+| `src-tauri/src/main.rs` | ✅ 있음 | 데스크톱/모바일 공통 진입점(`travelerp_lib::run()`) |
+| `@tauri-apps/cli` | ✅ 있음 | `2.11.4` 설치됨 (`npm run tauri` 동작, 누락 아님) |
+| `src-tauri/gen/android` | ✅ 있음 | `tauri android init` 완료, Gradle 프로젝트 생성됨 |
+| Rust/Cargo | ✅ 있음 | Windows host + Android 4-ABI 타겟, 툴체인 D: 이전 완료 |
+| Android SDK/NDK | ✅ 있음 | NDK 26 + arm64 `.so` 크로스컴파일 성공 |
+| `tauri.conf.json` | ✅ 적용 | `beforeBuildCommand: "npm run build"`, `frontendDist: "../public"`(원격 URL 로드 전 임시값), `bundle.android.minSdkVersion: 24` |
+| 데스크톱 원격 URL | ⚠️ 미적용 | 운영 배포 시 `app.windows[0].url=http://rustkorea.cloud:3400` 설정 필요(미설정 시 정적 public만 표시) |
+| Windows 빌드 주의 | ⚠️ | `gen/android` 내 `BuildTask.kt`는 Windows node 경로 버그(#9536) 대응 패치 적용 상태 — `tauri android init` 재실행 시 패치 유실되므로 재적용 필요 |
 
 구조 요지:
 - `beforeDevCommand: "npm run dev"` · `devUrl: "http://localhost:3000"` → **개발 중엔 Next 서버를 webview가 그대로 로드**
@@ -48,9 +50,10 @@ setx JAVA_HOME "C:\Program Files\Android\Android Studio\jbr"   # AS 내장 JDK 1
 ```
 4. 확인: `java -version` (17 이상), `echo $env:ANDROID_HOME`
 
-### 2.4 tauri CLI 설치 (이번 프로젝트에 누락됨 — 필수)
+### 2.4 tauri CLI 설치 (이미 설치됨 — 확인만)
 ```bash
-npm install -D @tauri-apps/cli@^2
+npm ls @tauri-apps/cli   # 2.x 확인
+npm run tauri -- --version
 ```
 설치 후: `npm run tauri -- --version` 확인. (`package.json`의 `"tauri": "tauri"` 스크립트가 동작하게 됩니다.)
 
@@ -82,7 +85,7 @@ npm install -D @tauri-apps/cli@^2
   "app": {
     "windows": [{
       "title": "종합여행사 ERP",
-      "url": "https://your-domain.com",          // ★ 배포용 실제 서버 URL (모바일/데스크톱 공통)
+      "url": "http://rustkorea.cloud:3400",  // ★ 배포용 실제 서버 URL (모바일/데스크톱 공통)
       "width": 420, "height": 800,
       "minWidth": 360, "minHeight": 640,
       "center": true, "resizable": true

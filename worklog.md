@@ -45,3 +45,31 @@ Stage Summary:
 - Application is now visible in preview panel
 - Fixed immediate blocking syntax errors preventing page loads
 - Users can now see and interact with the application
+
+---
+
+Task ID: 3
+Agent: Main Agent
+Task: Backend feature completion (F1-F10) + doc/backend series
+
+Work Log:
+- Implemented semi-auto dispatch recommend/commit, runLog + autoSettlement, vehicleExpiry, excelImport, dashboardAlert, smsNotify + NotificationQueue
+- Added feature toggles (settings > features), VAPID push, TTS voice guide, audit logs, exports/imports
+- Wrote doc/backend/ 14-doc series (prd/api/database/architect/program/interface/security/risk/guide/notice/tauri/uiux/tdd/harness/install/agent)
+
+---
+
+Task ID: 4 (2026-09-23)
+Agent: Main Agent
+Task: doc-vs-source gap closure (P0-P3)
+
+Work Log:
+- P0: /guide app (layout/page/notifications/settings, GUIDE-only guard, login redirect, mobile-nav split, driver layout DRIVER-only); tauri.conf.json beforeBuildCommand + minSdkVersion 24
+- P1: document-templates/fields ResourceDef + render/history API + documents dashboard page; raw import API (XLSX/HWPX parse, HWP/PDF preserve); douzone mapper/export/retry/logs API + settings keys; EMAIL adapter + notification retry/schedule/inbox API + IN_APP auto-enqueue + inbox card on driver/guide apps; stats read-through cache (5min) + refresh API; /api/health (public)
+- P2: CI workflow (lint+tsc), prisma/migrations/0_baseline (resolve, no data loss), DB-backed login lock (LoginAttempt), audit sha256 hash chain + verify API, excel import caps (10MB/2000 rows), scripts/backup.mjs + npm run backup
+- P3: tauri.md status refresh, worklog continuation, api/notice/interface/security/database doc updates
+- Verified each step with npx tsc --noEmit + eslint (exit 0)
+
+Stage Summary:
+- All doc-specified "prepared/future" modules now have working implementations
+- Remaining manual ops: backup scheduler registration, douzone/SMS/email gateway URLs, NEXTAUTH_SECRET rotation for prod

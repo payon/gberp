@@ -1,8 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import {
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  Monitor,
+  X,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -39,10 +46,14 @@ function ymdKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function DispatchCalendar() {
+function fmtDateLabel(key: string): string {
+  return `${key.slice(0, 4)}년 ${Number(key.slice(5, 7))}월 ${Number(key.slice(8))}일`;
+}
+
+function CalendarView({ fullScreen = false }: { fullScreen?: boolean }) {
   const today = new Date();
   const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(() => ymdKey(today));
 
   const monthParam = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
   const { data, isLoading } = useQuery({
@@ -52,6 +63,7 @@ export function DispatchCalendar() {
       if (!res.ok) throw new Error("배차 조회 실패");
       return res.json();
     },
+    refetchInterval: 60_000,
   });
 
   const cells = useMemo(() => {
@@ -60,7 +72,7 @@ export function DispatchCalendar() {
     const firstDow = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const out: (string | null)[] = [];
-    for (let i = 0; i < ((firstDow - WEEK_START + 7) % 7); i++) out.push(null);
+    for (let i = 0; i < (firstDow - WEEK_START + 7) % 7; i++) out.push(null);
     for (let d = 1; d <= daysInMonth; d++) out.push(ymdKey(new Date(year, month, d)));
     while (out.length % 7 !== 0) out.push(null);
     return out;
@@ -82,28 +94,35 @@ export function DispatchCalendar() {
 
   const selectedList = selected ? (byDay.get(selected) ?? []) : [];
   const todayKey = ymdKey(today);
+  const isTodaySelected = selected === todayKey;
+  const inProgressCount = selectedList.filter((d) => d.status === "IN_PROGRESS").length;
+  const completedCount = selectedList.filter((d) => d.status === "COMPLETED").length;
 
   const move = (delta: number) => {
-    setSelected(null);
     setCursor((c) => new Date(c.getFullYear(), c.getMonth() + delta, 1));
   };
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-      <Card>
-        <CardContent className="p-4">
+    <div className={cn("grid gap-4", fullScreen ? "h-full lg:grid-cols-[1fr_360px]" : "lg:grid-cols-[1fr_320px]")}>
+      <Card className={cn(fullScreen && "flex flex-col overflow-hidden")}>
+        <CardContent className={cn("flex flex-col", fullScreen ? "h-full p-4" : "p-4")}>
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <CalendarDays className="h-5 w-5 text-primary" />
-              <h3 className="text-lg font-bold">
+              <h3 className={cn("font-bold", fullScreen ? "text-xl" : "text-lg")}>
                 {cursor.getFullYear()}년 {cursor.getMonth() + 1}월
               </h3>
+              {fullScreen && (
+                <span className="ml-1 hidden items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 sm:flex">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" /> 실시간
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-1">
               <Button variant="outline" size="sm" onClick={() => move(-1)} aria-label="이전 달">
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <Button variant="outline" size="sm" onClick={() => { setSelected(null); setCursor(new Date(today.getFullYear(), today.getMonth(), 1)); }}>
+              <Button variant="outline" size="sm" onClick={() => setSelected(todayKey)}>
                 오늘
               </Button>
               <Button variant="outline" size="sm" onClick={() => move(1)} aria-label="다음 달">
@@ -113,7 +132,7 @@ export function DispatchCalendar() {
           </div>
 
           {isLoading ? (
-            <div className="flex h-64 items-center justify-center text-muted-foreground">
+            <div className="flex flex-1 items-center justify-center text-muted-foreground">
               <Loader2 className="mr-2 h-5 w-5 animate-spin" /> 불러오는 중...
             </div>
           ) : (
@@ -124,8 +143,10 @@ export function DispatchCalendar() {
                     {l}
                   </div>
                 ))}
+              </div>
+              <div className={cn("mt-1 grid grid-cols-7 gap-1", fullScreen && "flex-1 auto-rows-fr")}>
                 {cells.map((key, i) => {
-                  if (!key) return <div key={`x-${i}`} className="min-h-[88px] rounded-lg bg-muted/30" />;
+                  if (!key) return <div key={`x-${i}`} className={cn("rounded-lg bg-muted/30", fullScreen ? "min-h-0" : "min-h-[88px]")} />;
                   const list = byDay.get(key) ?? [];
                   const isToday = key === todayKey;
                   const isSelected = key === selected;
@@ -135,18 +156,27 @@ export function DispatchCalendar() {
                       type="button"
                       onClick={() => setSelected(isSelected ? null : key)}
                       className={cn(
-                        "flex min-h-[88px] flex-col items-stretch gap-1 rounded-lg border p-1 text-left transition-colors",
+                        "flex flex-col items-stretch gap-1 rounded-lg border p-1.5 text-left transition-colors",
+                        fullScreen ? "h-full min-h-0 overflow-hidden hover:bg-muted/40" : "min-h-[88px]",
                         isSelected
-                          ? "border-primary bg-primary/10"
-                          : "border-transparent hover:border-border hover:bg-muted/50",
-                        isToday && !isSelected && "border-primary/50"
+                          ? isToday
+                            ? "border-primary bg-primary/15 ring-2 ring-primary/70"
+                            : "border-primary bg-primary/10 ring-1 ring-primary/40"
+                          : isToday
+                            ? "border-primary/70 bg-primary/5"
+                            : "border-transparent hover:border-border hover:bg-muted/50"
                       )}
                     >
-                      <span className={cn("px-1 text-xs font-semibold", key === ymdKey(today) && "text-primary")}>
+                      <span
+                        className={cn(
+                          "flex h-6 w-7 items-center justify-center rounded-full text-xs font-bold",
+                          isToday && "bg-primary text-primary-foreground"
+                        )}
+                      >
                         {Number(key.slice(8))}
                       </span>
                       <span className="flex flex-col gap-0.5 overflow-hidden">
-                        {list.slice(0, 3).map((d) => (
+                        {list.slice(0, fullScreen ? 6 : 3).map((d) => (
                           <span key={d.id} className="flex items-center gap-1 text-[10px] leading-tight">
                             <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[d.status] ?? "bg-muted")} />
                             <span className="truncate">
@@ -159,15 +189,15 @@ export function DispatchCalendar() {
                           </span>
                         ))}
                       </span>
-                      {list.length > 3 && (
-                        <span className="px-1 text-[10px] text-muted-foreground">+{list.length - 3}건</span>
+                      {list.length > (fullScreen ? 6 : 3) && (
+                        <span className="px-1 text-[10px] text-muted-foreground">+{list.length - (fullScreen ? 6 : 3)}건</span>
                       )}
                     </button>
                   );
                 })}
               </div>
 
-              <div className="mt-4 flex flex-wrap gap-3 text-xs text-muted-foreground">
+              <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                 {Object.entries(DISPATCH_STATUS_LABELS)
                   .filter(([k]) => k !== "CANCELLED" && k !== "FAILED")
                   .map(([k, label]) => (
@@ -175,15 +205,30 @@ export function DispatchCalendar() {
                       <span className={cn("h-2 w-2 rounded-full", STATUS_DOT[k])} /> {label}
                     </span>
                   ))}
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-primary" /> 오늘
+                </span>
               </div>
             </>
           )}
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="p-4">
-          <h4 className="mb-3 font-semibold">{selected ? `${selected.slice(0, 4)}년 ${Number(selected.slice(5, 7))}월 ${Number(selected.slice(8))}일` : `${cursor.getFullYear()}년 ${cursor.getMonth() + 1}월 일정`}</h4>
+      <Card className={cn(fullScreen && "flex flex-col overflow-hidden")}>
+        <CardContent className={cn("flex flex-col gap-3", fullScreen ? "h-full p-4" : "p-4")}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className={cn("font-semibold", isTodaySelected && "text-primary")}>
+              {selected ? (isTodaySelected ? "오늘 일정" : fmtDateLabel(selected)) : "일정"}
+            </h4>
+            {selected && selectedList.length > 0 && (
+              <span className="text-xs text-muted-foreground">
+                총 {selectedList.length}건
+                {inProgressCount > 0 && <span className="ml-1 text-emerald-600">· 진행 {inProgressCount}</span>}
+                {completedCount > 0 && <span className="ml-1">· 완료 {completedCount}</span>}
+              </span>
+            )}
+          </div>
+
           {selected && selectedList.length === 0 ? (
             <p className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">배차 없음</p>
           ) : !selected ? (
@@ -191,9 +236,15 @@ export function DispatchCalendar() {
               날짜를 선택하면 해당일 배차를 확인할 수 있습니다.
             </p>
           ) : (
-            <div className="space-y-2">
+            <div className={cn("space-y-2", fullScreen && "flex-1 overflow-auto")}>
               {selectedList.map((d) => (
-                <div key={d.id} className="rounded-lg border p-3">
+                <div
+                  key={d.id}
+                  className={cn(
+                    "rounded-lg border p-3",
+                    d.status === "IN_PROGRESS" && "border-emerald-300 bg-emerald-50/50"
+                  )}
+                >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-semibold">{d.scheduleName}</span>
                     <Badge variant={d.status === "IN_PROGRESS" ? "info" : d.status === "COMPLETED" ? "secondary" : "warning"}>
@@ -208,7 +259,7 @@ export function DispatchCalendar() {
                     <div className="font-medium text-foreground">
                       {d.driverName !== "-" ? d.driverName : "-"} · {d.plateNumber}
                     </div>
-                    {(d.guideName && d.guideName !== "-") && <div>가이드: {d.guideName}</div>}
+                    {d.guideName && d.guideName !== "-" && <div>가이드: {d.guideName}</div>}
                     {d.departureLocation && <div>출발: {d.departureLocation}</div>}
                     {d.arrivalLocation && <div>도착: {d.arrivalLocation}</div>}
                   </div>
@@ -221,6 +272,43 @@ export function DispatchCalendar() {
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+export function DispatchCalendar() {
+  return <CalendarView />;
+}
+
+export function DispatchMonitor({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[100] flex flex-col bg-background">
+      <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Monitor className="h-5 w-5 text-primary" />
+          <h2 className="text-lg font-bold">배차 관제</h2>
+          <span className="hidden items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 sm:flex">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" /> 실시간
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="hidden text-xs text-muted-foreground md:inline">Esc로 닫기</span>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            <X className="h-4 w-4" /> 닫기
+          </Button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 p-4">
+        <CalendarView fullScreen />
+      </div>
     </div>
   );
 }

@@ -56,6 +56,7 @@ export const MENU: MenuItem[] = [
   { href: "/dashboard/settlements", label: "정산 관리", group: "정산·회계", roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN] },
   { href: "/dashboard/reports", label: "통계/리포트", group: "정산·회계", roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.SALES] },
   { href: "/dashboard/notifications", label: "알림 전파", group: "업무", roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OPERATOR, UserRole.SALES] },
+  { href: "/dashboard/documents", label: "문서 출력", group: "업무", roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.SALES] },
   { href: "/dashboard/settings", label: "업체 설정", group: "시스템", roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN] },
   { href: "/dashboard/audit-logs", label: "감사 로그", group: "시스템", roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN] },
   { href: "/dashboard/users", label: "사용자/권한", group: "시스템", roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN] },
@@ -68,7 +69,9 @@ export function menuForRole(role: UserRole | undefined): MenuItem[] {
 export function canAccessModule(pathname: string, role: UserRole | undefined): boolean {
   const segments = pathname.split("/").filter(Boolean); // ["dashboard", "clients"]
   if (segments.length === 0) return false;
-  if (segments[0] === "driver" || segments[0] === "guide") return role === UserRole.DRIVER || role === UserRole.GUIDE;
+  // 기사/가이드 앱은 교차 접근 금지 (DRIVER↔GUIDE). 미리보기는 SA/ADMIN만.
+  if (segments[0] === "driver") return role === UserRole.DRIVER || hasRole(role, [UserRole.SUPER_ADMIN, UserRole.ADMIN]);
+  if (segments[0] === "guide") return role === UserRole.GUIDE || hasRole(role, [UserRole.SUPER_ADMIN, UserRole.ADMIN]);
   if (segments[0] !== "dashboard") return true;
   const moduleName = segments[1];
   if (!moduleName) return role !== undefined;

@@ -41,7 +41,7 @@ npx prisma db seed        # package.json의 db:seed 실행
 
 # 5) 개발 서버 실행
 npm run dev               # = next dev -p 3000
-# → http://localhost:3000
+# → http://localhost:3000 (개발) / 운영: http://rustkorea.cloud:3400
 ```
 
 > ⚠️ **prisma generate(`npm run db:generate`)는 반드시 개발 서버를 멈춘 상태에서 실행**하세요.
@@ -260,7 +260,7 @@ npm run tauri dev        # 개발 (devUrl=http://localhost:3000)
 | 페이지가 스키마를 못 참고 깨짐 | 서버 켠 채로 `prisma generate` → 서버 중지 후 재생성·재기동 |
 | `start` 스크립트가 bun 호출 | 이 환경엔 bun 없음 → `npm run build` 후 `next start -p 3000`로 실행 |
 | VAPID 오류 (push) | `.env`에서 `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`/`VAPID_SUBJECT` 확인 |
-| 로그인 후 무한 리다이렉트 | `NEXTAUTH_URL=http://localhost:3000` 확인, 시크릿 일치 |
+| 로그인 후 무한 리다이렉트 | `NEXTAUTH_URL` 확인(운영 http://rustkorea.cloud:3400), 시크릿 일치 |
 | middleware deprecation 경고 | Next 16 → `proxy.ts` 권장이지만 동작에는 영향 없음 |
 | `package.json#prisma` deprecation | `prisma.config.ts`로 이관 권장 (선택) |
 

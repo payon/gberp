@@ -23,12 +23,14 @@ import {
   FileText,
   FileUp,
   SlidersHorizontal,
+  AppWindow,
   type LucideIcon,
 } from "lucide-react";
 import { parseHolidayList, validateHolidays, type HolidayRow } from "@/lib/holidays";
 import { FEATURE_DEFS, featureSettingKey } from "@/lib/features";
+import { AppIconSettings } from "@/components/app-icon-settings";
 
-type TabKey = "company" | "voice" | "dispatch" | "holidays" | "documents" | "features";
+type TabKey = "company" | "voice" | "dispatch" | "holidays" | "documents" | "features" | "appicon";
 
 const TABS: { key: TabKey; label: string; icon: LucideIcon }[] = [
   { key: "company", label: "업체 정보", icon: Building2 },
@@ -36,6 +38,7 @@ const TABS: { key: TabKey; label: string; icon: LucideIcon }[] = [
   { key: "dispatch", label: "배차 규칙", icon: Truck },
   { key: "holidays", label: "휴일", icon: CalendarDays },
   { key: "documents", label: "문서", icon: FileText },
+  { key: "appicon", label: "앱 아이콘", icon: AppWindow },
   { key: "features", label: "기능", icon: SlidersHorizontal },
 ];
 
@@ -492,6 +495,17 @@ export default function SettingsPage() {
             </div>
           )}
 
+          {tab === "appicon" && (
+            <AppIconSettings
+              values={values}
+              setField={setField}
+              onChanged={() => {
+                refresh();
+                router.refresh();
+              }}
+            />
+          )}
+
           {tab === "features" && (
             <div className="space-y-6">
               <div>
@@ -556,6 +570,34 @@ export default function SettingsPage() {
                       type="password"
                       value={values["sms.apiKey"] ?? ""}
                       onChange={(e) => setField("sms.apiKey", e.target.value)}
+                      placeholder="(선택)"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl border p-4">
+                <div className="mb-3 font-semibold">더존 연동</div>
+                <p className="mb-3 text-sm text-muted-foreground">
+                  회계 분개·전표의 더존 전송에 사용합니다. 비워 두면 전송 로그에만 PENDING으로 적재됩니다.
+                </p>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="douzone.endpointUrl">엔드포인트 URL</Label>
+                    <Input
+                      id="douzone.endpointUrl"
+                      type="text"
+                      value={values["douzone.endpointUrl"] ?? ""}
+                      onChange={(e) => setField("douzone.endpointUrl", e.target.value)}
+                      placeholder="https://example.com/douzone/import"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="douzone.apiKey">API 키</Label>
+                    <Input
+                      id="douzone.apiKey"
+                      type="password"
+                      value={values["douzone.apiKey"] ?? ""}
+                      onChange={(e) => setField("douzone.apiKey", e.target.value)}
                       placeholder="(선택)"
                     />
                   </div>

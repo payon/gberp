@@ -53,7 +53,9 @@ export default function LoginPage() {
     } else {
       const session = await getSession();
       const role = session?.user?.role;
-      if (role === "DRIVER" || role === "GUIDE") {
+      if (role === "GUIDE") {
+        router.push("/guide");
+      } else if (role === "DRIVER") {
         router.push("/driver");
       } else {
         router.push("/dashboard");

@@ -1,11 +1,11 @@
 # Notice — 알림 시스템 설계서
 
-> 버전: v0.2.0 · 갱신일: 2026-09-17
+> 버전: v0.2.1 · 갱신일: 2026-09-28
 
 ## 1. 개요
 
 - 중앙 큐: **NotificationQueue** (`notification_queue` 테이블) — 모든 채널(PUSH/SMS/EMAIL/IN_APP)의 공통 적재 구조
-- 채널 어댑터는 등록 방식으로 확장(현재 SMS·PUSH 구현, EMAIL은 미구현)
+- 채널 어댑터는 등록 방식으로 확장(SMS·PUSH·EMAIL·IN_APP 모두 구현, 재시도 워커 포함)
 
 ## 2. 데이터 모델
 
@@ -85,9 +85,9 @@ PUSH  : title="새 배차 안내" body="{고객} · {상품} · {시각} 출발"
 TTS   : "오늘 오전 7시 30분 경기도의회를 출발해 경기도 교육연수원에 도착하는 출퇴근 셔틀 배차입니다. 차량은 경기12가3456, 45인승 대형버스입니다…"
 ```
 
-## 8. 향후 확장
+## 8. 확장 구현 상태
 
-- EMAIL 어댑터: 큐 적재 기반 그대로 SMTP 전송 모듈만 추가
-- 재시도 워커: `status=FAILED/PENDING && retryCount<3` 스캔 → 재발송
-- 예약 발송: `scheduledAt` 스케줄러(기존 필드 보유)
-- 읽음 확인(IN_APP): 알림함 UI 연동
+- EMAIL 어댑터: 구현 (`src/lib/email.ts` — 게이트웨이 웹훅 POST, 미설정 시 큐 적재만). 설정 키 `email.gatewayUrl/email.apiKey/email.from`
+- 재시도 워커: 구현 (`POST /api/notifications/retry`, SA/ADMIN/OP) — `PENDING/FAILED && retryCount<3 && scheduledAt 도래` 최대 50건 배치, 채널별 재시도(SMS/EMAIL 게이트웨이, PUSH 구독, IN_APP 즉시 SENT)
+- 예약 발송: 구현 (`POST /api/notifications/schedule` — 채널/대상/제목/본문/`scheduledAt` 지정 적재, 워커가 도래분만 처리. OS 스케줄러에서 retry 엔드포인트 주기 호출 권장)
+- 읽음 확인(IN_APP): 구현 — 배차 생성 시 기사/가이드에게 IN_APP 자동 적재, `GET /api/notifications/inbox` + `POST /api/notifications/inbox/read`(미읽음=PENDING, 읽음=SENT), 기사/가이드 알림 페이지 수신함 카드 연동

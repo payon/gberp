@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSettings, saveSettings, setting } from "@/lib/settings";
 import { revalidateSettings } from "@/lib/revalidate";
 import { requireManager, removeStoredFile } from "@/lib/uploads";
+import { SECURITY_POLICY } from "@/lib/security-policy";
 import { mkdirSync, writeFileSync } from "fs";
 import path from "path";
 
-const MAX_SIZE = 20 * 1024 * 1024;
+const MAX_SIZE = SECURITY_POLICY.upload.specMaxBytes;
 const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads", "spec");
 
 const ALLOWED_EXT = new Set([".pdf", ".xls", ".xlsx", ".doc", ".docx", ".hwp", ".hwpx", ".png", ".jpg", ".jpeg"]);
@@ -22,6 +23,9 @@ export async function POST(req: NextRequest) {
     // ignore
   }
   const ext = path.extname(originalName).toLowerCase();
+  if (originalName.includes("\0") || originalName.includes("..")) {
+    return NextResponse.json({ error: "파일명이 올바르지 않습니다." }, { status: 400 });
+  }
   if (!ALLOWED_EXT.has(ext)) {
     return NextResponse.json(
       { error: "지원하지 않는 파일 형식입니다. (PDF/엑셀/한글/워드/이미지 파일만 가능)" },

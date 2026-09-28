@@ -5,6 +5,7 @@ export type SpeechCard = {
   arrivalLocation?: string | null;
   plateNumber?: string | null;
   guideName?: string | null;
+  driverName?: string | null;
   specialConditions?: string | null;
   stops?: string[] | null;
 };
@@ -20,6 +21,7 @@ export function buildDriverSpeech(c: SpeechCard): string {
   if (c.arrivalLocation) parts.push(`도착지, ${cut(c.arrivalLocation)}`);
   if (c.plateNumber) parts.push(`차량 번호, ${plateToKorean(c.plateNumber)}`);
   if (c.guideName && c.guideName !== "-") parts.push(`동승 가이드, ${cut(c.guideName)}`);
+  if (c.driverName && c.driverName !== "-") parts.push(`운행 기사, ${cut(c.driverName)}`);
   if (c.specialConditions && c.specialConditions.trim()) {
     parts.push(`특이사항, ${cut(c.specialConditions)}`);
   }

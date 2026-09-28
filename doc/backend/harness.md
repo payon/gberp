@@ -1,6 +1,6 @@
 # Harness — 운영 체크리스트 & 모니터링
 
-> 버전: v0.2.0 · 갱신일: 2026-09-17
+> 버전: v0.2.1 · 갱신일: 2026-09-28
 > 서버에 운영 배포 후 반복 수행할 운영 작업(런북)입니다.
 
 ## 1. 일일 점검 (~5분)
@@ -15,7 +15,7 @@
 
 - [ ] 차량 보험·검사 만료 임박(30일) 목록 점검 → 갱신/정비
 - [ ] 기사 면허 만료 임박 목록 점검
-- [ ] 백업 확인: 최근 `db/custom.db` 스냅샷 존재·복원 테스트 1회
+- [ ] 백업 확인: 최근 `pg_dump` 존재·복원 테스트 1회
 - [ ] 디스크 여유(로고/규격서 업로드 폴더, `.next`)
 - [ ] 로그(dev/프록시 액세스 로그)에서 4xx/5xx 이상 패턴
 
@@ -27,37 +27,30 @@
 - [ ] 접근 권한(RBAC) 재검토 — 퇴사자/부서 이동 반영
 - [ ] 시크릿 순환(NEXTAUTH_SECRET, VAPID, SMS API 키) 검토
 
-## 4. 백업 절차
+## 4. 백업 절차 (PostgreSQL)
 
-```powershell
-# 수동 스냅샷
-Copy-Item D:\develop\gberp\db\custom.db D:\backup\custom-$(Get-Date -Format yyyyMMdd-HHmm).db
-
-# 예약(권장): Windows 작업 스케줄러에서 일 1회
-#   인수: Copy-Item <db> <backupDir>\custom-<yyyyMMdd>.db
-#   보관: 30일 로테이션
+```bash
+# 일일 백업 (cron 권장)
+docker compose exec -T db pg_dump -U gberp gberp | gzip > backup/gberp-$(date +%Y%m%d).sql.gz
+tar czf backup/uploads-$(date +%Y%m%d).tgz public/uploads
+# 보관: 30일 로테이션 (find backup -mtime +30 -delete)
 ```
 
-- SQLite는 파일 복사만으로 백업되며 점검 중(쓰기 중) 복사는 WAL 동일 파일이면 단순 복사로 안전합니다.
-- 규격서/로고(업로드 폴더)도 함께 백업하세요.
+- SQLite 파일 복사 방식은 폐기. DB 복원: `gunzip -c backup/xxx.sql.gz | docker compose exec -T db psql -U gberp gberp`.
 
-## 5. 배포 절차 (서버)
+## 5. 배포 절차 (서버, Docker)
 
-```powershell
+```bash
 # 1) 사전 확인
 git status                       # 커밋 상태
 npm run lint
-npx tsc --noEmit
+./node_modules/.bin/tsc --noEmit
 
-# 2) 빌드
-npm run build                    # standalone 생성 (이후 node scripts/start.mjs 실행)
+# 2) 빌드·기동
+docker compose up -d --build     # entrypoint가 db push 자동 수행
 
-# 3) DB 반영 (스키마 변경 시만)
-npx prisma db push               # dev 서버 중지 후 실행 (DLL 잠금 EPERM 방지)
-
-# 4) 기동
-node scripts/start.mjs           # 프로덕션
-npm run dev                      # 개발
+# 3) 확인
+curl http://rustkorea.cloud:3400/api/health
 ```
 
 ## 6. 모니터링 포인트 (SQL/실행 예시)
@@ -71,12 +64,12 @@ SELECT status, count(*) FROM settlements GROUP BY status;
 -- SMS 미발송
 SELECT count(*) FROM notification_queue WHERE channel='SMS' AND status='PENDING';
 
--- 오늘 배차 현황
+-- 오늘 배차 현황 (PostgreSQL)
 SELECT status, count(*) FROM dispatches
-WHERE date(scheduledStart)=date('now') AND deletedAt IS NULL;
+WHERE scheduledStart::date = CURRENT_DATE AND "deletedAt" IS NULL GROUP BY status;
 
 -- 감사 로그 최근
-SELECT userName, action, tableName, createdAt FROM audit_logs ORDER BY createdAt DESC LIMIT 50;
+SELECT "userName", action, "tableName", "createdAt" FROM audit_logs ORDER BY "createdAt" DESC LIMIT 50;
 ```
 
 ## 7. 인시던트 대응 루틴 (SEV 정의)

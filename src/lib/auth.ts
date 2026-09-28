@@ -2,39 +2,51 @@ import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "./prisma";
+import { SECURITY_POLICY } from "./security-policy";
 import { UserRole } from "@prisma/client";
 
-// 계정별 로그인 실패 제한 (단일 인스턴스용 인메모리)
-const MAX_FAILS = 8;
-const WINDOW_MS = 15 * 60 * 1000;
-const attempts = new Map<string, { fails: number; firstFail: number }>();
+// 계정별 로그인 실패 제한 (DB 기반 — 다중 인스턴스 대응)
+const MAX_FAILS = SECURITY_POLICY.auth.maxFails;
+const WINDOW_MS = SECURITY_POLICY.auth.windowMs;
 
-function pruneAttempts(now = Date.now()) {
-  if (attempts.size < 1000) return;
-  for (const [k, v] of attempts) {
-    if (now - v.firstFail > WINDOW_MS) attempts.delete(k);
-  }
-}
-
-function isLocked(key: string): boolean {
-  const e = attempts.get(key);
-  if (!e) return false;
-  if (Date.now() - e.firstFail > WINDOW_MS) {
-    attempts.delete(key);
+async function isLocked(key: string): Promise<boolean> {
+  try {
+    const e = await prisma.loginAttempt.findUnique({ where: { key } });
+    if (!e) return false;
+    if (Date.now() - e.firstFail.getTime() > WINDOW_MS) {
+      await prisma.loginAttempt.delete({ where: { key } }).catch(() => null);
+      return false;
+    }
+    return e.fails >= MAX_FAILS;
+  } catch {
     return false;
   }
-  return e.fails >= MAX_FAILS;
 }
 
-function recordFail(key: string) {
-  const now = Date.now();
-  const e = attempts.get(key);
-  if (e && now - e.firstFail < WINDOW_MS) {
-    e.fails += 1;
-  } else {
-    attempts.set(key, { fails: 1, firstFail: now });
+async function recordFail(key: string) {
+  try {
+    const now = new Date();
+    const e = await prisma.loginAttempt.findUnique({ where: { key } });
+    if (e && now.getTime() - e.firstFail.getTime() < WINDOW_MS) {
+      await prisma.loginAttempt.update({ where: { key }, data: { fails: e.fails + 1 } });
+    } else {
+      await prisma.loginAttempt.upsert({
+        where: { key },
+        update: { fails: 1, firstFail: now },
+        create: { key, fails: 1, firstFail: now },
+      });
+    }
+  } catch {
+    // ignore
   }
-  pruneAttempts(now);
+}
+
+async function clearFails(key: string) {
+  try {
+    await prisma.loginAttempt.delete({ where: { key } }).catch(() => null);
+  } catch {
+    // ignore
+  }
 }
 
 function sleep(ms: number) {
@@ -44,7 +56,7 @@ function sleep(ms: number) {
 export const authOptions: NextAuthOptions = {
   session: {
     strategy: "jwt",
-    maxAge: 60 * 60 * 12,
+    maxAge: SECURITY_POLICY.auth.sessionMaxAgeSec,
   },
   secret: process.env.NEXTAUTH_SECRET,
   pages: {
@@ -61,29 +73,31 @@ export const authOptions: NextAuthOptions = {
         if (!credentials?.email || !credentials?.password) return null;
 
         const key = credentials.email.toLowerCase().trim();
-        if (isLocked(key)) return null;
+        if (await isLocked(key)) return null;
 
         // 계정 존재 여부에 따른 타이밍 차를 줄이고 무차별 공격 속도를 낮춘다
-        await sleep(150 + Math.floor(Math.random() * 150));
+        await sleep(
+          SECURITY_POLICY.auth.timingMinMs + Math.floor(Math.random() * SECURITY_POLICY.auth.timingJitterMs)
+        );
 
         const user = await prisma.user.findUnique({ where: { email: key } });
 
         if (!user) {
-          recordFail(key);
+          await recordFail(key);
           return null;
         }
         if (user.deletedAt || user.status !== "ACTIVE") {
-          recordFail(key);
+          await recordFail(key);
           return null;
         }
 
         const ok = await bcrypt.compare(credentials.password, user.passwordHash);
         if (!ok) {
-          recordFail(key);
+          await recordFail(key);
           return null;
         }
 
-        attempts.delete(key);
+        await clearFails(key);
 
         return {
           id: user.id,

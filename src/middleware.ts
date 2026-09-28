@@ -6,6 +6,7 @@ import type { UserRole } from "@prisma/client";
 const PUBLIC_PATHS = [
   "/login",
   "/api/auth",
+  "/api/health",
   "/api/settings/public",
   "/sw.js",
   "/manifest.webmanifest",

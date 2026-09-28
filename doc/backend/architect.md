@@ -1,6 +1,6 @@
 # Architect — 아키텍처 설계서
 
-> 버전: v0.2.0 · 갱신일: 2026-09-17
+> 버전: v0.2.1 · 갱신일: 2026-09-28
 
 ## 1. 아키텍처 개요
 
@@ -42,12 +42,13 @@
 | 결정 | 근거 |
 |---|---|
 | 단일 Next 서버(SSR+API) | 배포 단순화(Tauri 포함), 팀 운영의 단순성 |
-| ResourceDef 메타 회로 | CRUD 11개 리소스를 한 구현으로 95% 커버, 일관된 폼/목록/권한 |
+| ResourceDef 메타 회로 | CRUD 13개 리소스를 한 구현으로 95% 커버, 일관된 폼/목록/권한. 목록은 페이지네이션(`limit/offset`, 기본 100/최대 500) |
 | 기능 토글을 설정 DB에 저장 | 운영자가 코드 배포 없이 기능 개폐 |
 | 자동 저장소(SQLite) | 초기 운영·단일 인스턴스에 적합, 마이그레이션은 `prisma db push` |
-| soft delete 전역 | 감사·복구 용이 |
-| SMS/batch 실패 비전파 | 조회성 트랜잭션 분리, 부가 동작 실패는 무시(feature 큐에 잔존) |
-| 자동 정산은 driverId 미사용 | Settlement.driverId/guideId가 @unique — 같은 기사 2회차 충돌 방지 |
+| soft delete 전역 + 참조 가드 | 감사·복구 용이, 차량/기사/가이드 진행중 배차 참조 시 409 차단. 문서 템플릿/필드는 `deletedAt` 컬럼이 없어 하드 삭제(`ResourceDef.softDelete:false`) |
+| SMS/batch 실패 비전파 | 조회성 트랜잭션 분리, 부가 동작 실패는 무시(재시도 워커로 회수) |
+| 자동 정산은 driverId 미사용 | Settlement.driverId/guideId unique 제거(v0.2.1) — 다건 허용, 정식 식별자는 targetId/details |
+| 보안 중앙 정책 | `src/lib/security-policy.ts` 단일 소스(인증/페이징/업로드/타임아웃/재시도), `sequence.ts` 번호 재시도 |
 
 ## 4. 배차 추천 파이프라인
 
@@ -56,15 +57,15 @@ GET /api/dispatch-recommend
   → schedule 존재/배차 미존재 확인
   → computeScheduleTimes (startTime/endTime, 기본 09:00~18:00)
   → recommendDispatch({start,end,participants,region})
-       기사: AVAILABLE + ACTIVE + 면허 유효 + 시간 비충돌
-         점수: 지역(20/10) + 평점(×4) + 휴게(±8/15) + 야간미허용(-8)
-       차량: ACTIVE + 좌석 적합 + 시간 비충돌
+       기사: AVAILABLE + ACTIVE + 면허 유효 + 시간 구간 겹침 제외
+         점수: 지역(20/10) + 평점(×4) + 휴게(+8/-15) + 야간미허용(-8)
+       차량: ACTIVE + 좌석 적합 + 시간 구간 겹침 제외
          점수: 좌석 적정(+15/+5) + 자차(+6)
        상위 5개 정렬
   → POST /api/dispatch-recommend
-       재충돌 확인 → createRecommendedDispatch
+       기사/차량 구간 겹침 재확인 → createRecommendedDispatch
          휴일·휴게 경고 수집 → dispatch 생성(autoRecommended, score)
-       audit(CREATE) 기록
+       audit(CREATE) 기록 + 통계 캐시 무효화
 ```
 
 ## 5. 정산 파이프라인 (자동)
@@ -89,9 +90,9 @@ PATCH /api/driver/dispatches/{id}/status { action:"end", … }
 
 ## 7. 데이터 무결성 규칙
 
-- 배차 생성/수정 `beforeCreate/beforeUpdate`에서 기사 시간 충돌 강제 차단(같은 날짜, CANCELLED/FAILED 제외)
-- 차량 소프트 삭제 시 연관 배차는 외래키 위험—삭제 대신 상태 전환 권장
-- 정산 번호/분개 번호/차량번호/이메일/전화 등 unique 필드 충돌 → 400 한글 메시지
+- 배차 생성/수정/추천커밋에서 기사·차량 시간 구간 겹침 강제 차단(`scheduledStart lte end AND scheduledEnd gte start`, CANCELLED/FAILED 제외)
+- 차량/기사/가이드 소프트 삭제 시 진행중 배차 참조가 있으면 409 차단 — 외래키 위험 제거
+- 정산 번호/분개 번호(`nextDailyNumber` 재시도 생성)/차량번호/이메일/전화 등 unique 필드 충돌 → 400 한글 메시지
 
 ## 8. 배포 아키텍처
 

@@ -2,12 +2,12 @@ Dockerfile
 .dockerignore
 node_modules
 npm-debug.log
-README.md
 .next
 .git
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
-test
+db/
+backup/
 *.log
 local-*
+.env
+.env.local
+coverage

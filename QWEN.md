@@ -1,3 +1,6 @@
+> ARCHIVED (2026-09-23): 과거 Laravel/Python 기획 지시서. 현 구현은 Next.js(App Router + Prisma + SQLite)이며
+> 현행 기준은 `doc/backend/*`이다. 기획 원본(테이블 명세 등) 참조용으로만 보관하고, 구현 판단은 doc/backend을 따른다.
+
 🔴 SYSTEM / ROLE
 You are a senior Korean SI engineer with real experience delivering
 ERP systems for Korean travel agencies, transportation companies,

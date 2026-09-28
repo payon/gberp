@@ -181,6 +181,18 @@ export async function createRecommendedDispatch(input: {
   if (conflict) {
     throw new Error("선택한 기사는 같은 시간대에 다른 배차가 이미 있습니다. 다른 후보를 선택해주세요.");
   }
+  const vehicleConflict = await prisma.dispatch.findFirst({
+    where: {
+      vehicleId,
+      deletedAt: null,
+      status: { notIn: ["CANCELLED", "FAILED"] },
+      scheduledStart: { lte: end },
+      scheduledEnd: { gte: start },
+    },
+  });
+  if (vehicleConflict) {
+    throw new Error("선택한 차량은 같은 시간대에 다른 배차가 이미 있습니다. 다른 후보를 선택해주세요.");
+  }
 
   const warnings: string[] = [];
   const settings = await getSettings();

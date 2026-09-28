@@ -9,6 +9,7 @@ import { auditLog } from "@/lib/audit";
 import { notifyDispatchCreated } from "@/lib/notify";
 import { buildData, validateRequired } from "@/lib/crud";
 import { hasRole } from "@/lib/permissions";
+import { SECURITY_POLICY } from "@/lib/security-policy";
 import type { UserRole } from "@prisma/client";
 
 function headerMapFor(sheet: any, def: ResourceDef): { header: string; field: FieldDef }[] {
@@ -52,9 +53,14 @@ export async function POST(
     return NextResponse.json({ error: "엑셀 파일(.xlsx/.xls)을 첨부해주세요." }, { status: 400 });
   }
 
+  const MAX_FILE_BYTES = SECURITY_POLICY.upload.importMaxBytes;
+  const MAX_ROWS = SECURITY_POLICY.upload.importMaxRows;
   let wb: XLSX.WorkBook;
   try {
     const buf = Buffer.from(await (file as File).arrayBuffer());
+    if (buf.byteLength === 0 || buf.byteLength > MAX_FILE_BYTES) {
+      return NextResponse.json({ error: "파일 크기가 올바르지 않습니다. (최대 10MB)" }, { status: 400 });
+    }
     wb = XLSX.read(buf, { type: "buffer" });
   } catch {
     return NextResponse.json({ error: "엑셀 파일을 읽지 못했습니다." }, { status: 400 });
@@ -66,12 +72,15 @@ export async function POST(
   if (!Array.isArray(sheet) || sheet.length === 0) {
     return NextResponse.json({ error: "데이터 행이 없습니다." }, { status: 400 });
   }
+  if (sheet.length > MAX_ROWS) {
+    return NextResponse.json({ error: `한 번에 최대 ${MAX_ROWS}행까지 등록할 수 있습니다.` }, { status: 400 });
+  }
 
   const colMap = headerMapFor(sheet as any, def);
   const createdCount = { n: 0 };
   const failed: { row: number; error: string }[] = [];
 
-  for (let i = 1; i < sheet.length; i++) {
+  for (let i = 0; i < sheet.length; i++) {
     const rawRow: any = sheet[i];
     let empty = true;
     for (const key in rawRow) {
@@ -88,8 +97,8 @@ export async function POST(
     }
 
     try {
-      let data = buildData(def, input);
-      const missing = validateRequired(def, data);
+      let data = buildData(def, input, { forCreate: true });
+      const missing = validateRequired(def, data, { forCreate: true });
       if (missing) throw new Error(missing);
       if (def.transformInput) data = def.transformInput(data);
       if (def.beforeCreate) data = await def.beforeCreate(data, user!);
@@ -130,6 +139,6 @@ export async function POST(
   }
 
   return NextResponse.json({
-    data: { created: createdCount.n, failed, total: sheet.length - 1 },
+    data: { created: createdCount.n, failed, total: sheet.length },
   });
 }

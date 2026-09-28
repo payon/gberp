@@ -3,9 +3,10 @@ import { AuditAction, UserRole, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/crud";
 import { hasRole } from "@/lib/permissions";
+import { SECURITY_POLICY } from "@/lib/security-policy";
 
-const MAX_LIMIT = 500;
-const DEFAULT_LIMIT = 100;
+const MAX_LIMIT = SECURITY_POLICY.pagination.maxLimit;
+const DEFAULT_LIMIT = SECURITY_POLICY.pagination.defaultLimit;
 
 export async function GET(req: NextRequest) {
   const { user, response } = await getSessionUser();
@@ -26,12 +27,12 @@ export async function GET(req: NextRequest) {
     where.action = action as AuditAction;
   }
   if (table) {
-    where.tableName = { contains: table };
+    where.tableName = { contains: table, mode: "insensitive" };
   }
   if (q) {
     where.OR = [
-      { userName: { contains: q } },
-      { description: { contains: q } },
+      { userName: { contains: q, mode: "insensitive" } },
+      { description: { contains: q, mode: "insensitive" } },
       { recordId: { contains: q } },
     ];
   }

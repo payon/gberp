@@ -6,6 +6,10 @@ import { hasRole } from "@/lib/permissions";
 import { logCreate, logUpdate, logSoftDelete } from "@/lib/audit";
 import { RESOURCE_DEFS, ConflictError, type ResourceDef, type FieldDef } from "@/lib/resources";
 import { notifyDispatchCreated } from "@/lib/notify";
+import { SECURITY_POLICY } from "@/lib/security-policy";
+import { invalidateStatsCache } from "@/lib/stats-cache";
+import { isMenuAllowed, parseRbacOverrides } from "@/lib/app-menus";
+import { getSettings, setting } from "@/lib/settings";
 import type { UserRole } from "@prisma/client";
 
 const AUTH_ERROR = NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
@@ -27,6 +31,34 @@ export async function getSessionUser(): Promise<{ user: SessionUser | null; resp
 
 function canAccess(def: ResourceDef, role: UserRole | undefined): boolean {
   return hasRole(role, def.roles);
+}
+
+const RESOURCE_MENU_HREF: Record<string, string> = {
+  clients: "/dashboard/clients",
+  products: "/dashboard/products",
+  schedules: "/dashboard/schedules",
+  contracts: "/dashboard/contracts",
+  dispatches: "/dashboard/dispatches",
+  vehicles: "/dashboard/vehicles",
+  drivers: "/dashboard/drivers",
+  guides: "/dashboard/guides",
+  accounting: "/dashboard/accounting",
+  settlements: "/dashboard/settlements",
+  users: "/dashboard/users",
+  "document-templates": "/dashboard/documents",
+  "document-fields": "/dashboard/documents",
+};
+
+async function canAccessWithOverrides(
+  def: ResourceDef,
+  resource: string,
+  role: UserRole | undefined
+): Promise<boolean> {
+  if (!canAccess(def, role)) return false;
+  const href = RESOURCE_MENU_HREF[resource];
+  if (!href) return true;
+  const settings = await getSettings();
+  return isMenuAllowed(role, href, parseRbacOverrides(setting(settings, "rbac.overrides")));
 }
 
 export function parseValue(raw: unknown, field: FieldDef): unknown {
@@ -68,10 +100,10 @@ export function parseValue(raw: unknown, field: FieldDef): unknown {
   }
 }
 
-export function buildData(def: ResourceDef, input: Record<string, any>): Record<string, any> {
+export function buildData(def: ResourceDef, input: Record<string, any>, opts?: { forCreate?: boolean }): Record<string, any> {
   const data: Record<string, any> = {};
   for (const field of def.fields) {
-    if (field.createOnly) continue;
+    if (field.createOnly && !opts?.forCreate) continue;
     if (!(field.key in input)) continue;
     const value = parseValue(input[field.key], field);
     if (value !== null || field.key === "notes") data[field.key] = value;
@@ -79,10 +111,10 @@ export function buildData(def: ResourceDef, input: Record<string, any>): Record<
   return data;
 }
 
-export function validateRequired(def: ResourceDef, data: Record<string, any>): string | null {
+export function validateRequired(def: ResourceDef, data: Record<string, any>, opts?: { forCreate?: boolean }): string | null {
   for (const field of def.fields) {
     if (!field.required) continue;
-    if (field.createOnly) continue;
+    if (field.createOnly && !opts?.forCreate) continue;
     const v = data[field.key];
     if (v === undefined || v === null || v === "") {
       return `"${field.label}"(은)는 필수 입력 항목입니다.`;
@@ -131,11 +163,12 @@ export async function handleList(req: NextRequest, resource: string) {
 
   const { user, response } = await getSessionUser();
   if (response) return response;
-  if (!canAccess(def, user!.role)) return FORBIDDEN;
+  if (!(await canAccessWithOverrides(def, resource, user!.role))) return FORBIDDEN;
 
   const isAll = req.nextUrl.searchParams.get("all") === "1";
   const model = (prisma as any)[def.model];
-  const where: any = { deletedAt: null };
+  const useSoftDelete = def.softDelete !== false;
+  const where: any = useSoftDelete ? { deletedAt: null } : {};
 
   const monthParam = req.nextUrl.searchParams.get("month");
   if (monthParam && resource === "dispatches" && /^\d{4}-\d{2}$/.test(monthParam)) {
@@ -150,7 +183,7 @@ export async function handleList(req: NextRequest, resource: string) {
       where,
       include: def.include,
       orderBy: def.orderBy,
-      take: 500,
+      take: SECURITY_POLICY.pagination.defaultAllTake,
     });
     return NextResponse.json({
       options: rows.map((r: any) => ({
@@ -160,8 +193,17 @@ export async function handleList(req: NextRequest, resource: string) {
     });
   }
 
-  const rows = await model.findMany({ where, include: def.include, orderBy: def.orderBy });
-  return NextResponse.json({ data: rows.map((r: any) => def.serialize(r)) });
+  const sp = req.nextUrl.searchParams;
+  const limit = Math.min(
+    Math.max(Number(sp.get("limit")) || SECURITY_POLICY.pagination.defaultLimit, 1),
+    SECURITY_POLICY.pagination.maxLimit
+  );
+  const offset = Math.max(Number(sp.get("offset")) || 0, 0);
+  const [total, rows] = await Promise.all([
+    model.count({ where }),
+    model.findMany({ where, include: def.include, orderBy: def.orderBy, skip: offset, take: limit }),
+  ]);
+  return NextResponse.json({ data: rows.map((r: any) => def.serialize(r)), total, limit, offset });
 }
 
 // ----------------------------------------------------------------
@@ -173,7 +215,7 @@ export async function handleCreate(req: NextRequest, resource: string) {
 
   const { user, response } = await getSessionUser();
   if (response) return response;
-  if (!canAccess(def, user!.role)) return FORBIDDEN;
+  if (!(await canAccessWithOverrides(def, resource, user!.role))) return FORBIDDEN;
 
   let input: Record<string, any>;
   try {
@@ -182,8 +224,8 @@ export async function handleCreate(req: NextRequest, resource: string) {
     return NextResponse.json({ error: "잘못된 요청 본문입니다." }, { status: 400 });
   }
 
-  let data = buildData(def, input);
-  const missing = validateRequired(def, data);
+  let data = buildData(def, input, { forCreate: true });
+  const missing = validateRequired(def, data, { forCreate: true });
   if (missing) return NextResponse.json({ error: missing }, { status: 400 });
 
   if (def.transformInput) data = def.transformInput(data);
@@ -200,6 +242,9 @@ export async function handleCreate(req: NextRequest, resource: string) {
     const model = (prisma as any)[def.model];
     const created = await model.create({ data });
     await logCreate(user, def.model, created.id, created);
+    if (["dispatch", "settlement", "contract", "accountingEntry"].includes(def.model)) {
+      await invalidateStatsCache().catch(() => null);
+    }
     if (def.model === "dispatch") {
       try {
         await notifyDispatchCreated(created);
@@ -226,7 +271,7 @@ export async function handleUpdate(req: NextRequest, resource: string, id: strin
 
   const { user, response } = await getSessionUser();
   if (response) return response;
-  if (!canAccess(def, user!.role)) return FORBIDDEN;
+  if (!(await canAccessWithOverrides(def, resource, user!.role))) return FORBIDDEN;
 
   let input: Record<string, any>;
   try {
@@ -249,11 +294,14 @@ export async function handleUpdate(req: NextRequest, resource: string, id: strin
   try {
     const model = (prisma as any)[def.model];
     const existing = await model.findUnique({ where: { id } });
-    if (!existing || existing.deletedAt) {
+    if (!existing || (def.softDelete !== false && existing.deletedAt)) {
       return NextResponse.json({ error: "데이터를 찾을 수 없습니다." }, { status: 404 });
     }
     const updated = await model.update({ where: { id }, data });
     await logUpdate(user, def.model, id, existing, updated);
+    if (["dispatch", "settlement", "contract", "accountingEntry"].includes(def.model)) {
+      await invalidateStatsCache().catch(() => null);
+    }
     return NextResponse.json({ data: def.serialize(updated), warning: extractWarning(updated) });
   } catch (e) {
     const body = prismaErrorBody(e);
@@ -270,15 +318,31 @@ export async function handleDelete(req: NextRequest, resource: string, id: strin
 
   const { user, response } = await getSessionUser();
   if (response) return response;
-  if (!canAccess(def, user!.role)) return FORBIDDEN;
+  if (!(await canAccessWithOverrides(def, resource, user!.role))) return FORBIDDEN;
 
   try {
     const model = (prisma as any)[def.model];
     const existing = await model.findUnique({ where: { id } });
-    if (!existing || existing.deletedAt) {
+    if (!existing || (def.softDelete !== false && existing.deletedAt)) {
       return NextResponse.json({ error: "데이터를 찾을 수 없습니다." }, { status: 404 });
     }
-    await model.update({ where: { id }, data: { deletedAt: new Date() } });
+    if (["vehicle", "driver", "guide"].includes(def.model)) {
+      const fkField = def.model === "vehicle" ? "vehicleId" : def.model === "driver" ? "driverId" : "guideId";
+      const refs = await (prisma as any).dispatch.count({
+        where: { [fkField]: id, deletedAt: null, status: { notIn: ["CANCELLED", "FAILED", "COMPLETED"] } },
+      });
+      if (refs > 0) {
+        return NextResponse.json(
+          { error: "진행 중인 배차가 있어 삭제할 수 없습니다. 먼저 배차를 취소/완료하거나 상태를 변경해주세요." },
+          { status: 409 }
+        );
+      }
+    }
+    if (def.softDelete === false) {
+      await model.delete({ where: { id } });
+    } else {
+      await model.update({ where: { id }, data: { deletedAt: new Date() } });
+    }
     await logSoftDelete(user, def.model, id);
     return NextResponse.json({ ok: true });
   } catch (e) {

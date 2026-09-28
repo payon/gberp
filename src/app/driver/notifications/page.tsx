@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { usePush } from "@/hooks/use-push";
+import { InboxCard } from "@/components/inbox-card";
 import {
   Bell,
   BellRing,
@@ -111,6 +112,8 @@ export default function DriverNotificationsPage() {
           )}
         </CardContent>
       </Card>
+
+      <InboxCard queryKey="driver-inbox" />
 
       <Card>
         <CardContent className="space-y-3 p-5">

@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/permissions";
 import { UserRole } from "@prisma/client";
 import { todayStart, todayEnd, monthStart } from "@/lib/utils";
+import { getCachedStats, setCachedStats } from "@/lib/stats-cache";
+import { SECURITY_POLICY } from "@/lib/security-policy";
 
 const STAFF_ROLES = [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OPERATOR, UserRole.SALES];
 
@@ -17,6 +19,10 @@ export async function GET(req: NextRequest) {
   if (!hasRole(role, STAFF_ROLES)) {
     return NextResponse.json({ error: "권한이 없습니다." }, { status: 403 });
   }
+
+  const cacheKey = `stats:overview:${role}`;
+  const cached = await getCachedStats(cacheKey);
+  if (cached) return NextResponse.json({ ...cached, cached: true });
 
   const [
     totalClients,
@@ -82,7 +88,7 @@ export async function GET(req: NextRequest) {
   const isAdmin = role === "SUPER_ADMIN" || role === "ADMIN";
   const isOperator = role === "OPERATOR" || role === "SALES";
 
-  return NextResponse.json({
+  const payload = {
     role,
     cards: isAdmin
       ? [
@@ -130,5 +136,7 @@ export async function GET(req: NextRequest) {
       type: c.clientType,
       count: c._count._all,
     })),
-  });
+  };
+  await setCachedStats(cacheKey, "dashboard_overview", payload, SECURITY_POLICY.stats.ttlMinutes);
+  return NextResponse.json({ ...payload, cached: false });
 }

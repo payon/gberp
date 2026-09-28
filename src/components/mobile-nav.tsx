@@ -11,8 +11,12 @@ import {
   Settings,
   Settings2,
   LogOut,
+  Map,
+  Megaphone,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
+import { appMenuForRole, type AppMenuItem } from "@/lib/app-menus";
 
 type NavItem = {
   href?: string;
@@ -21,12 +25,34 @@ type NavItem = {
   action?: "logout";
 };
 
+const APP_ICONS: Record<AppMenuItem["icon"], LucideIcon> = {
+  run: BusFront,
+  guide: Map,
+  notice: Bell,
+  settings: SlidersHorizontal,
+};
+
 function itemsForRole(role?: string): NavItem[] {
-  if (role === "DRIVER" || role === "GUIDE") {
+  const appMenu = appMenuForRole(role as "DRIVER" | "GUIDE" | undefined);
+  if (appMenu.length > 0) {
+    return [
+      ...appMenu.map((m) => ({ href: m.href, label: m.label, icon: APP_ICONS[m.icon] })),
+      { action: "logout" as const, label: "로그아웃", icon: LogOut },
+    ];
+  }
+  if (role === "GUIDE") {
+    return [
+      { href: "/guide", label: "투어", icon: Map },
+      { href: "/guide/notifications", label: "알림", icon: Megaphone },
+      { href: "/guide/settings", label: "안내설정", icon: Settings2 },
+      { action: "logout", label: "로그아웃", icon: LogOut },
+    ];
+  }
+  if (role === "DRIVER") {
     return [
       { href: "/driver", label: "운행", icon: BusFront },
-      { href: "/driver/settings", label: "안내", icon: Settings2 },
       { href: "/driver/notifications", label: "알림", icon: Bell },
+      { href: "/driver/settings", label: "음성안내", icon: Settings2 },
       { action: "logout", label: "로그아웃", icon: LogOut },
     ];
   }

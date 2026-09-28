@@ -1,7 +1,36 @@
 # Install — 설치 및 배포 가이드
 
-> 버전: v0.2.0 · 갱신일: 2026-09-17
-> 대상: Windows 서버(또는 로컬)에서 프로덕션 운영. Next.js standalone + Caddy 리버스 프록시 구조.
+> 버전: v0.3.0 · 갱신일: 2026-09-28
+> 대상: 운영 서버에서 Docker Compose(PostgreSQL + Next.js standalone)로 운영. 운영 URL: `http://rustkorea.cloud:3400`.
+
+## 0. Docker Compose 빠른 시작 (권장)
+
+```bash
+# 1) 환경변수 (.env, .env.example 참조)
+#   NEXTAUTH_SECRET=<openssl rand -base64 32>
+#   POSTGRES_PASSWORD=<강력한 비밀번호>
+#   SEED_PASSWORD=<초기 관리자 비밀번호>
+#   NEXTAUTH_URL=http://rustkorea.cloud:3400
+
+# 2) 기동 (db 생성 → 스키마 반영 → 시드 → 앱)
+docker compose up -d --build
+
+# 3) 확인
+curl http://localhost:3400/api/health          # {"ok":true,"db":"up"}
+# 로그인: http://rustkorea.cloud:3400/login
+```
+
+- 첫 기동 시 `db push` + `SEED_ON_BOOT=true`면 시드가 자동 적재됩니다 (사용자가 있으면 스킵).
+- 재기동: `docker compose up -d`, 로그: `docker compose logs -f app`, 중지: `docker compose down` (DB 볼륨 유지), 완전 초기화: `docker compose down -v`.
+
+## 1. 요구 사양
+
+| 항목 | 최소 | 권장 |
+|---|---|---|
+| OS | Linux (Docker 지원) | Ubuntu 22.04 |
+| Docker | 24+ (compose v2 포함) | 최신 |
+| 디스크 | 2GB | 10GB+ (이미지·DB·업로드) |
+| DB | PostgreSQL 16 (compose `db` 서비스, 볼륨 `pgdata`) | 동일 + 정기 `pg_dump` |
 
 ## 1. 요구 사양
 
@@ -13,72 +42,63 @@
 | 디스크 | 1GB | 5GB+ (배차·업로드·로그) |
 | DB | SQLite(내장) | SQLite(파일) / 필요 시 Postgres |
 
-## 2. 로컬 개발 설치
+## 2. 로컬 개발 설치 (PostgreSQL)
 
 ```bash
 # 1) 의존성
-npm install
+npm install   # 또는 bun install
 
-# 2) 환경변수 (.env)
-#   DATABASE_URL=file:../db/custom.db
+# 2) DB 기동 (도커의 db 서비스만)
+docker compose up -d db
+
+# 3) 환경변수 (.env)
+#   DATABASE_URL=postgresql://gberp:<비밀번호>@localhost:5432/gberp
 #   NEXTAUTH_SECRET=<랜덤 32자 이상>
 #   NEXTAUTH_URL=http://localhost:3000
+#   SEED_PASSWORD=<시드용 초기 비밀번호>
 #   VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT (웹푸시용, npm run vapid)
 
-# 3) DB + 시드
+# 4) DB + 시드
 npm run db:push
 npm run db:seed
 
-# 4) 개발 서버
-npm run dev          # http://localhost:3000
-# 로그인: admin@example.com / admin1234
+# 5) 개발 서버
+npm run dev          # http://localhost:3000 (개발) / 운영: http://rustkorea.cloud:3400
 ```
 
-## 3. 프로덕션 빌드·배포 (Windows)
+## 3. 프로덕션 빌드·배포 (Docker)
 
 ```bash
 # 1) 정적 검사
 npm run lint
-npx tsc --noEmit
+./node_modules/.bin/tsc --noEmit
 
-# 2) 빌드 (standalone 산출물 .next/standalone)
-npm run build
+# 2) 빌드·기동 (standalone 이미지)
+docker compose up -d --build
 
-# 3) DB 반영 (스키마 변경 시만, 서버 중지 후)
-npx prisma db push
-npx prisma generate
+# 3) DB 반영: 컨테이너 기동 시 entrypoint가 자동 수행
+#    - `prisma db push` (스키마 동기화)
+#    - `SEED_ON_BOOT=true`면 시드 (기존 데이터 있으면 스킵)
 
-# 4) 기동 (standalone 서버)
-node scripts/start.mjs        # 기본 포트 3000, 프로덕션 NODE_ENV 자동
-
-# 5) 확인
-Invoke-WebRequest http://localhost:3000/login -UseBasicParsing  # 200
+# 4) 확인
+curl http://rustkorea.cloud:3400/api/health   # {"ok":true,"db":"up"}
+Invoke-WebRequest http://rustkorea.cloud:3400/login -UseBasicParsing  # 200
 ```
 
-> `.next/standalone`만 복사해 가는 배포(파일 루트 아래 static만 별도 카피)도 가능합니다.
-> 자세한 파일 구성: `output: "standalone"`가 `next start`와 달리 실행 이미지를 만들며 `scripts/start.mjs`가 이를 기동합니다.
+> 구 방식(Windows 직접 기동/nssm)은 폐기. `scripts/start.mjs`는 컨테이너 entrypoint가 호출합니다.
 
-### Windows 자동 시작 (서비스)
-1. `nssm install GBERP "C:\Program Files\nodejs\node.exe" "D:\develop\gberp\scripts\start.mjs"` (예)
-2. 작업 디렉터리: `D:\develop\gberp`
-3. 시작 유형: 자동
+## 4. 리버스 프록시 (Caddy, TLS — 선택)
 
-## 4. 리버스 프록시 (Caddy, TLS)
-
-프로젝트 루트 `Caddyfile` 예시를 참고:
+프로젝트 루트 `Caddyfile` 예시를 참고 (`rustkorea.cloud` → 3400):
 
 ```
-yourdomain.com {
-    reverse_proxy 127.0.0.1:3000
-    encode gzip
-    header {
-        Strict-Transport-Security "max-age=31536000"
-        X-Content-Type-Options nosniff
-    }
+rustkorea.cloud {
+    reverse_proxy 127.0.0.1:3400
+    ...
 }
 ```
 
-- 도메인 없이(IP) 운영 시: `https://<server-ip>` 또는 HTTP로 배포
+- 기본 배포는 compose의 3400 직접 노출(`http://rustkorea.cloud:3400`)이며, 80/443 전면을 붙일 때만 Caddy를 사용합니다.
 - **권장**: HTTPS 적용(전세버스 운행 데이터·개인정보 보호)
 
 ## 5. 데스크톱(Tauri) 패키징
@@ -96,33 +116,36 @@ npm run tauri build    # 전용 Windows 인스톨러(.msi/.exe) 생성
 - `/manifest.webmanifest`, `/sw.js`, `/offline` 경로 등록(공개 경로)
 - 브라우저에서 "앱 설치" 가능, 푸시 수신 시 `.well-known`/vapid 설정 필요
 
-## 7. 백업 설정
+## 7. 백업 설정 (PostgreSQL)
 
-```powershell
-# 일일 백업 (예약: Windows 작업 스케줄러)
-Copy-Item D:\develop\gberp\db\custom.db "D:\backup\custom-$(Get-Date -Format yyyyMMdd).db" -Force
+```bash
+# 권장: pg_dump 일일 백업
+docker compose exec db pg_dump -U gberp gberp | gzip > backup/gberp-$(date +%Y%m%d).sql.gz
+
+# 업로드 폴더 별도 백업
+tar czf backup/uploads-$(date +%Y%m%d).tgz public/uploads
 ```
 
-- 보관 30일 로테이션 권장, 업로드 폴더(로고·규격서)도 포함
+- 보관 30일 로테이션 권장. 구 SQLite 파일 백업(`db/custom.db` 복사) 방식은 폐기.
 
 ## 8. 업그레이드 절차
 
 ```bash
 git pull
-npm install
-npx prisma db push --force-reset?      # 스키마 변경 시에만, 데이터 주의
-npm run build
-node scripts/start.mjs                  # 재시작
-npm run lint && npx tsc --noEmit        # 회귀 검사
+docker compose up -d --build     # 이미지 재빌드 + entrypoint가 db push 자동 수행
+npm run lint && ./node_modules/.bin/tsc --noEmit        # 회귀 검사
 ```
 
 ## 9. 환경변수 요약
 
 | 변수 | 필수 | 설명 |
 |---|---|---|
-| DATABASE_URL | Y | `file:../db/custom.db` |
-| NEXTAUTH_SECRET | Y | JWT 서명용(운영용 랜덤값) |
-| NEXTAUTH_URL | Y | 배포 도메인 또는 localhost:3000 |
+| DATABASE_URL | Y | `postgresql://gberp:<비번>@db:5432/gberp` (운영) / `@localhost:5432` (개발) |
+| NEXTAUTH_SECRET | Y | JWT 서명용(운영용 랜덤값, `openssl rand -base64 32`) |
+| NEXTAUTH_URL | Y | http://rustkorea.cloud:3400 (운영) 또는 http://localhost:3000 (개발) |
+| POSTGRES_USER/PASSWORD/DB | Y | compose `db` 서비스 계정 (기본 gberp) |
+| SEED_ON_BOOT | N | `true`면 첫 기동 시 시드 자동 적재 |
+| SEED_PASSWORD / SEED_BCRYPT_ROUNDS | N | 시드 초기 비밀번호/라운드(기본 admin1234/12, 운영 주입 권장) |
 | VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT | 푸시 시 | `npm run vapid` 생성 |
 
 ## 10. 설치 후 검증 (체크리스트)

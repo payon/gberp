@@ -1,16 +1,17 @@
 # Interface — 외부 연동 인터페이스 설계서
 
-> 버전: v0.2.0 · 갱신일: 2026-09-17
+> 버전: v0.2.1 · 갱신일: 2026-09-28
 
 ## 1. 연동 개요
 
 | 연동 | 상태 | 핵심 파일 |
 |---|---|---|
-| SMS 게이트웨이 | 구현(기본 OFF) | `src/lib/notify.ts`, `settings sms.*` |
+| SMS 게이트웨이 | 구현(기본 OFF) | `src/lib/notify.ts`, `src/lib/notify-worker.ts`, `settings sms.*` |
 | 웹 푸시(Web Push) | 구현 | `src/lib/push.ts`, `src/lib/push-client.ts`, `src/app/api/push/*` |
+| 이메일 게이트웨이 | 구현(URL 미설정 시 큐 적재만) | `src/lib/email.ts`, `settings email.*` |
 | TTS(음성 안내) | 구현 | `src/lib/tts.ts`, `src/lib/speech.ts` |
 | 엑셀 파일 | 구현 | `xlsx`, `src/lib/xlsx.ts`, `/api/import`, `/api/exports` |
-| 더존(회계 연동) | 준비(구조만) | `AccountingEntry.dzExportReady/Status`, `AccountingSlip.dzSlipNumber` |
+| 더존(회계 연동) | 구현(전송잡+재시도+조회) | `src/lib/douzone.ts`, `/api/accounting/douzone/*` |
 | 규격서 업로드 | 구현 | `/api/upload/spec`, `/api/upload/logo` |
 
 ## 2. SMS 게이트웨이 연동
@@ -27,7 +28,8 @@
        .replace("{message}", encodeURIComponent(message))
        .replace("{apiKey}", encodeURIComponent(apiKey))
      ```
-- **실패 처리**: 네트워크 오류 무시(큐에 PENDING 남음 → 운영 콘솔에서 재시도 대상 확인)
+- **실패 처리**: 타임아웃 15초(`SECURITY_POLICY`), 네트워크 오류 무시(큐에 PENDING 남음 → `/api/notifications/retry`로 재시도)
+- **전화번호 검증**: `isValidPhone` 미통과 번호는 큐 적재 제외
 - **기본 메시지**: `[배차 안내] M/D HH:mm 출발 배차가 배정되었습니다. 차량/노선은 앱에서 확인해주세요.`
 
 ## 3. 웹 푸시
@@ -57,14 +59,17 @@
   - 실패 행사 `{row, error}` 수집, 전부 실패면 400 + 상세
 - **템플릿 = 내보내기 파일을 그대로 사용** (기능 탭 안내 문구)
 
-## 6. 더존(Douzone) 연동 준비
+## 6. 더존(Douzone) 연동
 
-- 현재는 **데이터 모델 준비 상태**:
-  - `AccountingEntry.dzExportReady/dzExportedAt/dzExportStatus`
-  - `AccountingSlip.dzSlipNumber/dzExportedAt`
-  - 계정코드·부계정코드 필드 보유
-- 향후 작업: 더존 CSV/API 포맷 매퍼, 전송 잡(Job), 전송결과 수신 웹훅
-- 분개번호 규칙: `AE-YYYYMMDD-NNN` (beforeCreate 자동)
+- **매퍼**: `src/lib/douzone.ts` — 분개/전표를 전표일자·전표번호·계정코드·차대·적요 CSV로 변환(`toCsv`, 따옴표 이스케이프)
+- **전송 잡**: `POST /api/accounting/douzone/export` (SA/ADMIN, 1회 최대 200건 — `SECURITY_POLICY.douzone.maxTargets`)
+  - body: `{ targetType: "entry"|"slip", targetIds[] }`
+  - `douzone.endpointUrl` 미설정 시 `douzone_export_logs`에 PENDING 적재만, 설정 시 15초 타임아웃 POST 후 SUCCESS/FAILED 반영
+  - 성공 시 분개 `dzExportedAt/dzExportStatus`, 전표 `dzExportedAt` 갱신
+- **재시도**: `POST /api/accounting/douzone/retry` `{ logId }` (최대 5회, RETRYING 경유)
+- **조회**: `GET /api/accounting/douzone/logs?status=&limit=`
+- **설정 키**: `douzone.endpointUrl / douzone.apiKey` (설정 > 기능 탭, whitelist 저장)
+- 분개번호 규칙: `AE-YYYYMMDD-NNN` (`nextDailyNumber` 재시도 생성)
 
 ## 7. Slack/Email 등 확장 방향
 

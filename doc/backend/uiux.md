@@ -1,6 +1,6 @@
 # UI/UX — 화면 구성 및 사용자 경험
 
-> 버전: v0.2.0 · 갱신일: 2026-09-17
+> 버전: v0.2.1 · 갱신일: 2026-09-28
 > Next.js App Router + Tailwind v4 + shadcn/ui(라디시 계열) 기준. 화면은 한글입니다.
 
 ## 1. 접근 구조
@@ -36,6 +36,7 @@
 | 정산 관리 | /dashboard/settlements | SA, ADMIN |
 | 통계/리포트 | /dashboard/reports | SA, ADMIN, SALES |
 | 알림 전파 | /dashboard/notifications | SA, ADMIN, OP, SALES |
+| 문서 출력 | /dashboard/documents | SA, ADMIN, SALES |
 | 업체 설정 | /dashboard/settings | SA, ADMIN |
 | 감사 로그 | /dashboard/audit-logs | SA, ADMIN |
 | 사용자/권한 | /dashboard/users | SA, ADMIN |
@@ -65,7 +66,10 @@
   2. "추천 받기" → 기사/차량 후보 카드(점수+사유)
   3. 조합 선택 → "이 조합으로 등록" → 생성 후 목록/달력/통계 재검증(invalidate)
 
-## 6. 기사 앱 (/driver)
+## 6. 기사 앱 (/driver) / 가이드 앱 (/guide)
+
+- 기사 하단 메뉴: 운행/알림/음성안내 (`DRIVER_APP_MENU`), 가이드 하단 메뉴: 투어/알림/안내설정 (`GUIDE_APP_MENU`) — `src/lib/app-menus.ts` 분리 정의
+- 상단: 인사말, 오늘/전체 배차 수, 새로고침
 
 - 상단: 인사말, 오늘/전체 배차 수, 새로고침
 - 음성 안내 카드: "전체 음성 안내 듣기"(오늘 배차 큐 재생) / "음성 중지"
@@ -77,7 +81,8 @@
 
 ## 7. 설정 화면 (/dashboard/settings)
 
-- 탭: 업체 정보 / 알림·음성 / 배차 규칙 / 휴일 / 문서 / **기능**
+- 탭: 업체 정보 / 알림·음성 / 배차 규칙 / 휴일 / 문서 / **앱 아이콘** / **기능**
+- 앱 아이콘 탭: PWA 이름·짧은 이름·테마색·스플래시 배경 + 원본 업로드 → 8종 사이즈 미리보기 + 기기별 프리뷰(모바일/태블릿/데스크탑) + TWA 연동 안내
 - 기능 탭: FEATURE_DEFS 스위치(라벨+설명), SMS 게이트웨이 URL·API키 입력(플레이스홀더 설명)
 - 저장 시 즉시 반영(PUT /api/settings → revalidate)
 

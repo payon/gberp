@@ -3,6 +3,8 @@ import { prisma } from "./prisma";
 import { formatDate, formatWon } from "./utils";
 import { ROLE_LABELS } from "./permissions";
 import { getSettings, isHoliday, formatYmd, setting } from "./settings";
+import { SECURITY_POLICY, isValidEmail, isValidPhone } from "./security-policy";
+import { nextDailyNumber } from "./sequence";
 
 export type FieldType =
   | "text"
@@ -72,6 +74,8 @@ export type ResourceDef = {
   title: string;
   description: string;
   roles: UserRole[];
+  // false면 소프트 삭제 미사용 모델 (deletedAt 컬럼 없음 → where/삭제 분기)
+  softDelete?: boolean;
   listColumns: { key: string; label: string }[];
   searchKeys: string[];
   fields: FieldDef[];
@@ -198,6 +202,20 @@ export const USER_STATUS_LABELS: Record<string, string> = {
   INACTIVE: "비활성",
   SUSPENDED: "정지",
 };
+export const INSTITUTION_TYPE_LABELS: Record<string, string> = {
+  CENTRAL_GOV: "중앙부처",
+  LOCAL_GOV: "지자체",
+  PUBLIC_AGENCY: "공공기관",
+  SCHOOL: "학교",
+  MILITARY: "군부대",
+};
+export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
+  CONTRACT: "계약서",
+  CERTIFICATE: "확인서",
+  OPERATION_LOG: "운행일지",
+  ESTIMATE: "견적서",
+  RECEIPT: "영수증",
+};
 
 function statusBadge(status: string): string {
   switch (status) {
@@ -272,6 +290,36 @@ function appendWarning(data: any, msg: string | null | undefined) {
   const list = parseWarnings(data.warnings);
   if (!list.includes(msg)) list.push(msg);
   data.warnings = JSON.stringify(list);
+}
+
+export function hasIntervalOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): boolean {
+  return aStart.getTime() <= bEnd.getTime() && bStart.getTime() <= aEnd.getTime();
+}
+
+async function findDriverConflict(driverId: string, start: Date, end: Date, excludeId?: string) {
+  return prisma.dispatch.findFirst({
+    where: {
+      driverId,
+      deletedAt: null,
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+      status: { notIn: ["CANCELLED", "FAILED"] },
+      scheduledStart: { lte: end },
+      scheduledEnd: { gte: start },
+    },
+  });
+}
+
+async function findVehicleConflict(vehicleId: string, start: Date, end: Date, excludeId?: string) {
+  return prisma.dispatch.findFirst({
+    where: {
+      vehicleId,
+      deletedAt: null,
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+      status: { notIn: ["CANCELLED", "FAILED"] },
+      scheduledStart: { lte: end },
+      scheduledEnd: { gte: start },
+    },
+  });
 }
 
 async function holidayWarningFor(scheduledStart: any): Promise<string | null> {
@@ -661,18 +709,21 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
       return data;
     },
     beforeCreate: async (data: any) => {
-      const name = data.name;
-      const phone = data.phone;
-      const email =
-        data.email || `driver-${Date.now()}@globe.com`;
+      const name = String(data.name ?? "").trim();
+      const phone = String(data.phone ?? "").trim();
+      if (!name) throw new ConflictError("기사명은 필수입니다.");
+      if (!isValidPhone(phone)) throw new ConflictError("기사 연락처 형식이 올바르지 않습니다.");
+      const email = String(data.email || `driver-${Date.now()}-${Math.floor(Math.random() * 1000)}@globe.com`).toLowerCase();
+      if (!isValidEmail(email)) throw new ConflictError("이메일 형식이 올바르지 않습니다.");
       let user = await prisma.user.findUnique({ where: { phone } });
       if (!user) {
-        const crypto = (await import("crypto")).default;
-        const hash = crypto.createHash("sha256").update(String(Date.now())).digest("hex").slice(0, 8);
+        const bcrypt = (await import("bcryptjs")).default;
+        const { randomBytes } = await import("crypto");
+        const tempPassword = randomBytes(12).toString("base64url");
         user = await prisma.user.create({
           data: {
-            email: email.toLowerCase(),
-            passwordHash: "$2b$10$" + "x".repeat(53),
+            email,
+            passwordHash: bcrypt.hashSync(tempPassword, SECURITY_POLICY.auth.bcryptRounds),
             name,
             phone,
             role: "DRIVER",
@@ -739,15 +790,21 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
       { key: "rating", label: "평점(1~5)", type: "number", min: 0, max: 5, step: 0.1 },
     ],
     beforeCreate: async (data: any) => {
-      const name = data.name;
-      const phone = data.phone;
-      const email = data.email || `guide-${Date.now()}@globe.com`;
+      const name = String(data.name ?? "").trim();
+      const phone = String(data.phone ?? "").trim();
+      if (!name) throw new ConflictError("가이드명은 필수입니다.");
+      if (!isValidPhone(phone)) throw new ConflictError("가이드 연락처 형식이 올바르지 않습니다.");
+      const email = String(data.email || `guide-${Date.now()}-${Math.floor(Math.random() * 1000)}@globe.com`).toLowerCase();
+      if (!isValidEmail(email)) throw new ConflictError("이메일 형식이 올바르지 않습니다.");
       let user = await prisma.user.findUnique({ where: { phone } });
       if (!user) {
+        const bcrypt = (await import("bcryptjs")).default;
+        const { randomBytes } = await import("crypto");
+        const tempPassword = randomBytes(12).toString("base64url");
         user = await prisma.user.create({
           data: {
-            email: email.toLowerCase(),
-            passwordHash: "$2b$10$" + "x".repeat(53),
+            email,
+            passwordHash: bcrypt.hashSync(tempPassword, SECURITY_POLICY.auth.bcryptRounds),
             name,
             phone,
             role: "GUIDE",
@@ -833,21 +890,16 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
     beforeCreate: async (data: any) => {
       const start = new Date(data.scheduledStart);
       const end = new Date(data.scheduledEnd);
-      const otherDateStart = new Date(start);
-      otherDateStart.setHours(0, 0, 0, 0);
-      const otherDateEnd = new Date(start);
-      otherDateEnd.setHours(23, 59, 59, 999);
-      const conflict = await prisma.dispatch.findFirst({
-        where: {
-          driverId: data.driverId,
-          deletedAt: null,
-          status: { notIn: ["CANCELLED", "FAILED"] },
-          scheduledStart: { lte: otherDateEnd },
-          scheduledEnd: { gte: otherDateStart },
-        },
-      });
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+        throw new ConflictError("예정 출발·도착 시각이 올바르지 않습니다.");
+      }
+      const conflict = await findDriverConflict(data.driverId, start, end);
       if (conflict) {
         throw new ConflictError("해당 기사는 같은 시간대에 다른 배차가 이미 확정되어 있습니다.");
+      }
+      const vehicleConflict = await findVehicleConflict(data.vehicleId, start, end);
+      if (vehicleConflict) {
+        throw new ConflictError("해당 차량은 같은 시간대에 다른 배차가 이미 있습니다.");
       }
       appendWarning(data, await holidayWarningFor(data.scheduledStart));
       appendWarning(data, await restHoursWarningFor(data.driverId, data.scheduledStart));
@@ -857,22 +909,20 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
       if (data.driverId && data.scheduledStart && data.scheduledEnd) {
         const start = new Date(data.scheduledStart);
         const end = new Date(data.scheduledEnd);
-        const otherDateStart = new Date(start);
-        otherDateStart.setHours(0, 0, 0, 0);
-        const otherDateEnd = new Date(start);
-        otherDateEnd.setHours(23, 59, 59, 999);
-        const conflict = await prisma.dispatch.findFirst({
-          where: {
-            driverId: data.driverId,
-            deletedAt: null,
-            id: { not: id },
-            status: { notIn: ["CANCELLED", "FAILED"] },
-            scheduledStart: { lte: otherDateEnd },
-            scheduledEnd: { gte: otherDateStart },
-          },
-        });
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+          throw new ConflictError("예정 출발·도착 시각이 올바르지 않습니다.");
+        }
+        const conflict = await findDriverConflict(data.driverId, start, end, id);
         if (conflict) {
           throw new ConflictError("해당 기사는 같은 시간대에 다른 배차가 이미 확정되어 있습니다.");
+        }
+      }
+      if (data.vehicleId && data.scheduledStart && data.scheduledEnd) {
+        const start = new Date(data.scheduledStart);
+        const end = new Date(data.scheduledEnd);
+        const vehicleConflict = await findVehicleConflict(data.vehicleId, start, end, id);
+        if (vehicleConflict) {
+          throw new ConflictError("해당 차량은 같은 시간대에 다른 배차가 이미 있습니다.");
         }
       }
       const existing = await prisma.dispatch.findUnique({
@@ -959,12 +1009,7 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
       return data;
     },
     beforeCreate: async (data: any) => {
-      const today = new Date();
-      const ymd = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}`;
-      const count = await prisma.accountingEntry.count({
-        where: { entryNumber: { startsWith: `AE-${ymd}` } },
-      });
-      data.entryNumber = `AE-${ymd}-${String(count + 1).padStart(3, "0")}`;
+      data.entryNumber = await nextDailyNumber({ model: "accountingEntry", prefix: "AE", field: "entryNumber" });
       return data;
     },
     serialize: (r: any) => ({
@@ -1025,12 +1070,7 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
       { key: "notes", label: "비고", type: "textarea", full: true },
     ],
     beforeCreate: async (data: any) => {
-      const today = new Date();
-      const ymd = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}`;
-      const count = await prisma.settlement.count({
-        where: { settlementNumber: { startsWith: `S-${ymd}` } },
-      });
-      data.settlementNumber = `S-${ymd}-${String(count + 1).padStart(3, "0")}`;
+      data.settlementNumber = await nextDailyNumber({ model: "settlement", prefix: "S", field: "settlementNumber" });
       if (!data.totalAmount || data.totalAmount === 0) {
         data.totalAmount = (data.baseAmount || 0) + (data.overtimeAmount || 0) + (data.bonusAmount || 0) - (data.deductionAmount || 0);
       }
@@ -1089,10 +1129,17 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
       { key: "employeeCode", label: "사원번호", type: "text" },
     ],
     beforeCreate: async (data: any) => {
+      const rawPassword = String(data.password ?? "");
+      if (rawPassword.length < 8) {
+        throw new ConflictError("비밀번호는 8자 이상이어야 합니다.");
+      }
       const hash = (await import("bcryptjs")).default;
-      data.passwordHash = hash.hashSync(data.password || "admin1234", 10);
+      data.passwordHash = hash.hashSync(rawPassword, SECURITY_POLICY.auth.bcryptRounds);
       delete data.password;
       data.email = String(data.email).toLowerCase().trim();
+      if (!isValidEmail(data.email)) {
+        throw new ConflictError("이메일 형식이 올바르지 않습니다.");
+      }
       return data;
     },
     beforeUpdate: async (id: string, data: any) => {
@@ -1115,6 +1162,103 @@ export const RESOURCE_DEFS: Record<string, ResourceDef> = {
       createdAt: formatDate(r.createdAt),
     }),
     optionLabel: (r: any) => `${r.name} (${ROLE_LABELS[r.role] ?? r.role})`,
+  },
+
+  "document-templates": {
+    key: "document-templates",
+    model: "documentTemplate",
+    title: "문서 템플릿 관리",
+    description: "관공서 제출용 문서 템플릿(계약서/견적서/운행일지/확인서/영수증) 등록 및 필드 매핑",
+    roles: ["SUPER_ADMIN", "ADMIN"],
+    softDelete: false,
+    orderBy: { createdAt: "desc" },
+    listColumns: [
+      { key: "templateName", label: "템플릿명" },
+      { key: "institutionTypeLabel", label: "기관" },
+      { key: "documentTypeLabel", label: "문서 종류" },
+      { key: "version", label: "버전" },
+      { key: "statusLabel", label: "상태" },
+    ],
+    searchKeys: ["templateName", "description"],
+    fields: [
+      { key: "templateName", label: "템플릿명", type: "text", required: true, placeholder: "표준 계약서 v1" },
+      { key: "institutionType", label: "기관 구분", type: "select", required: true, options: enumOptions(INSTITUTION_TYPE_LABELS) },
+      { key: "documentType", label: "문서 종류", type: "select", required: true, options: enumOptions(DOCUMENT_TYPE_LABELS) },
+      { key: "version", label: "버전", type: "text", placeholder: "1.0" },
+      { key: "templatePath", label: "템플릿 파일 경로", type: "text", required: true, placeholder: "/uploads/spec/contract-template.hwp" },
+      { key: "templateFormat", label: "파일 형식", type: "select", required: true, options: [{ value: "HWP", label: "HWP" }, { value: "PDF", label: "PDF" }] },
+      { key: "fieldMapping", label: "필드 매핑(JSON)", type: "textarea", full: true, help: '{"clientName": "contract.client.name"}' },
+      { key: "coordinateMapping", label: "좌표 매핑(JSON)", type: "textarea", full: true },
+      { key: "description", label: "설명", type: "textarea", full: true },
+      { key: "isActive", label: "사용 여부", type: "select", options: [{ value: "true", label: "사용" }, { value: "false", label: "미사용" }] },
+    ],
+    transformInput: (data: any) => {
+      if (typeof data.fieldMapping === "object") data.fieldMapping = JSON.stringify(data.fieldMapping ?? {});
+      if (typeof data.coordinateMapping === "object") data.coordinateMapping = JSON.stringify(data.coordinateMapping ?? {});
+      if (data.isActive !== undefined) data.isActive = String(data.isActive) === "true";
+      return data;
+    },
+    serialize: (r: any) => ({
+      id: r.id,
+      templateName: r.templateName,
+      institutionType: r.institutionType,
+      institutionTypeLabel: INSTITUTION_TYPE_LABELS[r.institutionType] ?? r.institutionType,
+      documentType: r.documentType,
+      documentTypeLabel: DOCUMENT_TYPE_LABELS[r.documentType] ?? r.documentType,
+      version: r.version,
+      templatePath: r.templatePath,
+      templateFormat: r.templateFormat,
+      fieldMapping: r.fieldMapping,
+      coordinateMapping: r.coordinateMapping ?? "",
+      description: r.description ?? "",
+      isActive: r.isActive,
+      statusLabel: r.isActive ? "사용" : "미사용",
+      statusVariant: r.isActive ? "success" : "secondary",
+      createdAt: formatDate(r.createdAt),
+    }),
+    optionLabel: (r: any) => `${r.templateName} (${r.version ?? "1.0"})`,
+  },
+
+  "document-fields": {
+    key: "document-fields",
+    model: "documentField",
+    title: "문서 필드 관리",
+    description: "템플릿별 출력 필드 정의(좌표·데이터 소스·변환)",
+    roles: ["SUPER_ADMIN", "ADMIN"],
+    softDelete: false,
+    orderBy: { createdAt: "desc" },
+    listColumns: [
+      { key: "fieldName", label: "필드명" },
+      { key: "fieldCode", label: "필드 코드" },
+      { key: "fieldType", label: "형식" },
+      { key: "source", label: "데이터 소스" },
+    ],
+    searchKeys: ["fieldName", "fieldCode"],
+    fields: [
+      { key: "templateId", label: "템플릿", type: "select", optionsRoute: "document-templates", required: true },
+      { key: "fieldName", label: "필드명", type: "text", required: true },
+      { key: "fieldCode", label: "필드 코드", type: "text", required: true, placeholder: "clientName" },
+      { key: "fieldType", label: "형식", type: "select", required: true, options: [{ value: "TEXT", label: "텍스트" }, { value: "DATE", label: "날짜" }, { value: "AMOUNT", label: "금액" }] },
+      { key: "sourceTable", label: "소스 테이블", type: "text", placeholder: "contract" },
+      { key: "sourceField", label: "소스 필드 경로", type: "text", placeholder: "client.name" },
+      { key: "transformFunction", label: "변환 함수", type: "select", options: [{ value: "", label: "없음" }, { value: "koreanAmount", label: "한글 금액" }, { value: "date", label: "날짜 포맷" }] },
+      { key: "isRequired", label: "필수 여부", type: "select", options: [{ value: "true", label: "필수" }, { value: "false", label: "선택" }] },
+    ],
+    transformInput: (data: any) => {
+      if (data.isRequired !== undefined) data.isRequired = String(data.isRequired) === "true";
+      return data;
+    },
+    serialize: (r: any) => ({
+      id: r.id,
+      templateId: r.templateId,
+      fieldName: r.fieldName,
+      fieldCode: r.fieldCode,
+      fieldType: r.fieldType,
+      source: [r.sourceTable, r.sourceField].filter(Boolean).join("."),
+      transformFunction: r.transformFunction ?? "",
+      isRequired: r.isRequired,
+      createdAt: formatDate(r.createdAt),
+    }),
   },
 };
 

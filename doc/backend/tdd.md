@@ -1,6 +1,6 @@
 # TDD — 테스트 주도 개발 / 검증 절차
 
-> 버전: v0.2.0 · 갱신일: 2026-09-17
+> 버전: v0.2.1 · 갱신일: 2026-09-28
 > 프로젝트의 검증 전략은 **정적 검사(Lint/tsc) → 개발 서버 스모크 테스트(HTTP) → 수동 시나리오** 3단계입니다.
 
 ## 1. 사전 검증 (필수)
@@ -9,21 +9,20 @@
 # 코드 스타일
 npm run lint
 
-# 타입 검사
-npx tsc --noEmit
+# 타입 검사 (next.config는 ignoreBuildErrors:false이므로 빌드도 타입 강제)
+./node_modules/.bin/tsc --noEmit
 ```
 
 - 둘 다 통과해야 산출물로 인정합니다.
-- Next.js `next.config.ts`는 `typescript.ignoreBuildErrors: true`지만 **빌드 중 타입 오류는 소스 버그로 간주**하고 tsc를 별도 통과시킵니다.
 
 ## 2. 스모크 테스트 절차
 
 ### 2.1 테스트 준비
-- 개발 서버: `npm run dev -p 3000`
-- 데이터: `prisma db push` 후 `prisma db seed` (시드 데이터 기준)
-- 임시 테스트 스크립트(ESM .mjs)는 PowerShell의 `$` 문제 때문에 항상 **temp 스크립트 파일**로 작성합니다.
-  - 위치: `C:\Users\<USER>\AppData\Local\Temp\opencode\`
-  - 프로젝트 밖에서 Prisma 사용 시: `import { PrismaClient } from "file:///D:/develop/gberp/node_modules/@prisma/client/index.js"`
+- 개발 서버: `npm run dev -p 3000` + PostgreSQL: `docker compose up -d db`
+- 데이터: `npx prisma db push` 후 `npx prisma db seed` (시드 데이터 기준, `SEED_PASSWORD` 환경변수로 비밀번호 주입 가능)
+- 임시 테스트 스크립트(ESM .mjs)는 셸의 `$` 문제 때문에 항상 **temp 스크립트 파일**로 작성합니다.
+  - 위치: OS 임시 디렉토리(`$TMPDIR/opencode/` 또는 `/tmp/opencode/`)
+  - 프로젝트 밖에서 Prisma 사용 시 workspace의 `@prisma/client` 절대경로 import 사용(하드코딩된 `D:/` 경로 사용 금지)
 
 ### 2.2 쿠키 파서 주의사항 (반드시)
 - NextAuth 세션 쿠키는 `next-auth.session-token`처럼 `-`/`.`이 포함됩니다.
@@ -47,8 +46,17 @@ npx tsc --noEmit
 | 9 | 운행 종료(runLog 포함) PATCH | COMPLETED, worklog ENDED, 정산 초안 PENDING 생성 |
 | 10 | 정산 초안 조회 | `details`에 dispatchId 포함, `driverId/guideId` 미포함 |
 | 11 | 차량 보험만료 설정 후 ops-alerts | 경고 표시 |
-| 12 | 엑셀 일괄 등록 (클라이언트) | 생성수 증가, 중복(Foreign/Unique) 오류는 행 단위 실패 |
+| 12 | 엑셀 일괄 등록 (클라이언트) | 첫 행부터 등록, 생성수 증가, 중복(Foreign/Unique) 오류는 행 단위 실패 |
 | 13 | 테스트 데이터 정리 | 생성/수정된 데이터 원복 |
+| 14 | 가이드 로그인 → `/guide` 진입·운행 시작/종료 | 기사 앱과 동일 동작, 가이드 본인 배차만 |
+| 15 | 문서 출력 `POST /api/documents/render` | 201, 스냅샷 파일 + 이력 기록, 필수 필드 누락 시 400 |
+| 16 | 원본 보존 `POST /api/import/raw` (xlsx/hwpx) | 201 COMPLETED + 행 보존, hwp/pdf는 PENDING 보존 |
+| 17 | 더존 전송 `POST /api/accounting/douzone/export` (URL 미설정) | 201 PENDING 적재, URL 설정 시 SUCCESS/FAILED |
+| 18 | 알림 재시도 `POST /api/notifications/retry` + 수신함 | 처리 건수 반환, IN_APP 읽음 처리 |
+| 19 | `/api/stats` 2회 조회 | 2회째 `cached:true`, `POST /api/stats/refresh` 후 미캐시 |
+| 20 | `/api/health` + `/api/audit-logs/verify` | 200 + `{ intact:true }` |
+| 21 | 목록 페이지네이션 `GET /api/dispatches?limit=1&offset=1` | 200 + `{ data, total, limit, offset }` |
+| 22 | 차량 삭제 가드(진행중 배차 참조) | 409 |
 
 ### 2.4 기능 OFF→ON 매트릭스 (반드시 확인)
 | 기능 키 | OFF 시 | ON 시 |
@@ -75,7 +83,7 @@ npx tsc --noEmit
 | 쿠키 파싱 정규식 오류 | 스모크에서 전부 401 | 2.2 규칙 준수 |
 | `prisma generate` EPERM | DLL 잠김(dev 서버가 실행 중) | 포트 3000 node 프로세스 종료 후 generate |
 | 추천 테스트용 일정 부재 | 배차 없는 일정을 못 찾음(시드 2건 모두 배차됨) | 테스트용 일정을 Prisma로 직접 생성 후 사용 |
-| Settlement `driverId/guideId` @unique | 같은 기사 2번째 정산 생성 시 충돌 | 자동 정산은 `driverId/guideId` 미설정 철칙 |
-| sheet_to_json 배열 가정 | headerMapFor가 빈 맵 → "필수 입력" 400 | `sheet[0]`가 객체이므로 `Object.keys(sheet[0])` 사용(수정 완료) |
+| Settlement `driverId/guideId` @unique | 같은 기사 2번째 정산 생성 시 충돌 | v0.2.1 unique 제거 + targetId 인덱스, 자동 정산은 `driverId/guideId` 미설정 철칙 유지 |
+| sheet_to_json 배열 가정 | headerMapFor가 빈 맵 → "필수 입력" 400 | `sheet[0]`가 객체이므로 `Object.keys(sheet[0])` 사용 + 첫 행부터 처리(수정 완료) |
 | 엑셀 수식 셀 | `=1+1` 등 수식 주입 | `textCell()`가 문자열 안전 처리 |
 | PowerShell `node -e`의 `$` | 셸이 `$변수` 해석 | temp .mjs 파일로 작성 |

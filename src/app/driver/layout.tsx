@@ -12,7 +12,8 @@ export default async function DriverLayout({ children }: { children: React.React
     redirect("/login");
   }
   const role = session.user.role as UserRole;
-  if (role !== "DRIVER" && role !== "GUIDE") {
+  if (role === "GUIDE") redirect("/guide");
+  if (role !== "DRIVER") {
     redirect("/dashboard");
   }
 
@@ -26,7 +27,7 @@ export default async function DriverLayout({ children }: { children: React.React
           <div>
             <div className="text-sm font-bold leading-tight">여행사 ERP</div>
             <div className="text-[11px] text-muted-foreground">
-              {role === "GUIDE" ? "가이드" : "기사"}님 앱
+              기사님 앱
             </div>
           </div>
         </div>

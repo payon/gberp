@@ -6,6 +6,7 @@ import { auditLog } from "@/lib/audit";
 import { getSettings } from "@/lib/settings";
 import { featureEnabled } from "@/lib/features";
 import { DISPATCH_STATUS_LABELS, statusVariant } from "@/lib/resources";
+import { nextDailyNumber } from "@/lib/sequence";
 import type { DispatchStatus, UserRole } from "@prisma/client";
 
 export async function PATCH(
@@ -223,18 +224,12 @@ async function ensureAutoSettlement(
   });
   if (dup) return; // 같은 배차로 이미 생성된 정산이 있으면 건너뜀
 
-  const today = new Date();
-  const ymd = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}`;
-  const count = await prisma.settlement.count({
-    where: { settlementNumber: { startsWith: `S-${ymd}` } },
-  });
-
   const startDate = dispatch.scheduledStart ?? new Date();
   const endDate = dispatch.scheduledEnd ?? startDate;
 
   await prisma.settlement.create({
     data: {
-      settlementNumber: `S-${ymd}-${String(count + 1).padStart(3, "0")}`,
+      settlementNumber: await nextDailyNumber({ model: "settlement", prefix: "S", field: "settlementNumber" }),
       settlementDate: startDate,
       settlementEndDate: endDate,
       settlementType: type as any,

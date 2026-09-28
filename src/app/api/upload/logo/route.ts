@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSettings, saveSettings, setting } from "@/lib/settings";
 import { revalidateSettings } from "@/lib/revalidate";
 import { requireManager, removeStoredFile } from "@/lib/uploads";
+import { SECURITY_POLICY } from "@/lib/security-policy";
 import sharp from "sharp";
 import { mkdirSync, writeFileSync } from "fs";
 import path from "path";
 
-const MAX_SIZE = 5 * 1024 * 1024;
+const MAX_SIZE = SECURITY_POLICY.upload.logoMaxBytes;
 const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
 
 export async function POST(req: NextRequest) {
@@ -27,13 +28,13 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const image = sharp(buf, { limitInputPixels: 16_000_000 });
+    const image = sharp(buf, { limitInputPixels: SECURITY_POLICY.upload.logoMaxPixels });
     const meta = await image.metadata();
     if (!meta.width || !meta.height) {
       return NextResponse.json({ error: "이미지 정보를 읽을 수 없습니다." }, { status: 400 });
     }
     const resized = await image
-      .resize(512, 512, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .resize(SECURITY_POLICY.upload.logoSize, SECURITY_POLICY.upload.logoSize, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .png()
       .toBuffer();
 

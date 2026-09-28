@@ -2,15 +2,17 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarRange, List } from "lucide-react";
+import { CalendarRange, List, Monitor } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { ResourceWrapper } from "@/components/resource-wrapper";
 import { ResourceExcelActions } from "@/components/resource-excel-actions";
-import { DispatchCalendar } from "@/components/dispatch-calendar";
+import { DispatchCalendar, DispatchMonitor } from "@/components/dispatch-calendar";
 import { AutoDispatchButton } from "@/components/auto-dispatch-button";
 
 export default function DispatchesPage() {
   const [view, setView] = useState<"list" | "calendar">("calendar");
+  const [monitor, setMonitor] = useState(false);
   const { data: features } = useQuery({
     queryKey: ["features"],
     queryFn: async () => {
@@ -51,16 +53,30 @@ export default function DispatchesPage() {
               <List className="h-4 w-4" /> 목록
             </button>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setMonitor(true)}
+            className="gap-1.5"
+            aria-label="전체 화면 관제 모드"
+          >
+            <Monitor className="h-4 w-4" /> 관제 모드
+          </Button>
         </div>
       </div>
 
-      {view === "calendar" ? (
-        <DispatchCalendar />
-      ) : (
-        <ResourceWrapper
-          resource="dispatches"
-          headerActions={<ResourceExcelActions resource="dispatches" />}
-        />
+      {monitor && <DispatchMonitor onClose={() => setMonitor(false)} />}
+      {!monitor && (
+        <>
+          {view === "calendar" ? (
+            <DispatchCalendar />
+          ) : (
+            <ResourceWrapper
+              resource="dispatches"
+              headerActions={<ResourceExcelActions resource="dispatches" />}
+            />
+          )}
+        </>
       )}
     </div>
   );

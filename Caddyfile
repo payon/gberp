@@ -1,23 +1,16 @@
-:81 {
-	@transform_port_query {
-		query XTransformPort=*
+# 선택 사항: 도커 외부에서 80/443으로 서비스할 때만 사용.
+# 기본 배포는 docker-compose의 3400 직접 노출(http://rustkorea.cloud:3400)이며
+# 이 파일은 HTTPS 전면을 붙일 때의 예시입니다.
+rustkorea.cloud {
+	reverse_proxy 127.0.0.1:3400 {
+		header_up Host {host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP {remote_host}
 	}
-
-	handle @transform_port_query {
-		reverse_proxy localhost:{query.XTransformPort} {
-			header_up Host {host}
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto {scheme}
-			header_up X-Real-IP {remote_host}
-		}
-	}
-
-	handle {
-		reverse_proxy localhost:3000 {
-			header_up Host {host}
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto {scheme}
-			header_up X-Real-IP {remote_host}
-		}
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
 	}
 }

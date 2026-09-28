@@ -53,3 +53,8 @@ prompt
 *.bak
 
 server.log
+
+# 빌드 산출물·대용량 제외
+*.zip
+src-tauri/target/
+backup/

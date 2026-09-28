@@ -1,9 +1,16 @@
 # Database — 데이터베이스 설계서
 
-> 버전: v0.2.0 · 갱신일: 2026-09-17
-> 스키마: `prisma/schema.prisma` (Prisma 6 + SQLite). 파일: `db/custom.db` (`DATABASE_URL=file:../db/custom.db`)
+> 버전: v0.3.0 · 갱신일: 2026-09-28
+> 스키마: `prisma/schema.prisma` (Prisma 6 + **PostgreSQL**). 운영 `DATABASE_URL=postgresql://USER:PASS@db:5432/gberp` (docker-compose `db` 서비스)
 
-## 1. 모델 목록 (20개)
+## 0. PostgreSQL 전환 노트 (v0.3.0, SQLite → PG)
+
+- JSON 컬럼은 그대로 `String(Text)` 저장 — 코드 변경 없음.
+- `contains` 검색은 PG에서 대소문자 구분 → 감사 로그 조회는 `mode: "insensitive"` 적용. 목록 검색은 클라이언트 필터라 영향 없음.
+- SQLite 파일 백업 방식 폐기 → `pg_dump` (install.md §7, harness.md §4).
+- 스키마 동기화: 컨테이너 entrypoint가 `prisma db push` 자동 수행. 로컬 개발은 `docker compose up -d db` 후 동일 명령.
+
+## 1. 모델 목록 (26개)
 
 | # | 모델 | 테이블 | 용도 |
 |---|---|---|---|
@@ -27,6 +34,7 @@
 | 17-1 | PushSubscription | push_subscriptions | 웹 푸시 구독 |
 | 17-2 | AppSetting | app_settings | 키-값 설정(기능 토글 포함) |
 | 18 | AuditLog | audit_logs | 감사 로그 |
+| 18-1 | LoginAttempt | login_attempts | 로그인 실패 잠금(DB 기반) |
 | 19 | DouzoneExportLog | douzone_export_logs | 더존 전송 로그 |
 | 20 | StatsCache | stats_cache | 통계 캐시 |
 
@@ -79,11 +87,11 @@ User ──(SalesManager)─N Client  (salesManagerId)
 
 ## 4. 중요 제약 (운영 시 반드시 숙지)
 
-- **@unique 없이 Optional**: `Settlement.driverId`, `Settlement.guideId` — 정산당 기사/가이드 **1건 제한**.
-  → 자동 정산은 이 필드를 **사용하지 않음**(targetId/targetName + details JSON). 수동 정산에서 기사 연결 시 기존 건이 있으면 생성 불가.
+- **정산 대상 관계**: `Settlement.driverId/guideId`는 **unique 제거됨(v0.2.1)** — 다건 허용. 정식 식별자는 `targetId/targetName + details JSON`. `targetId` 인덱스 존재.
+  → 자동 정산은 이 필드를 **사용하지 않음**. 수동 정산도 target 기반으로 기록.
 - `settlementNumber`, `entryNumber`, `contractNumber`, `plateNumber`, `licenseNumber`, `bizNumber`, `email`, `phone`, `employeeCode`, `houseSetting.key`, `push.endpoint` 등 unique.
 - **JSON 문자열 컬럼**: seasonalPricing, options, items, route, specialConditions, issues, warnings, preferredRoutes, excludedRoutes, languages, specializations, coordinates 등은 Prisma `String` + JSON 문자열로 저장.
-- 소프트 삭제: `deletedAt DateTime?` — 주요 마스터 전역 사용.
+- 소프트 삭제: `deletedAt DateTime?` — 주요 마스터 전역 사용. 예외: `DocumentTemplate/DocumentField`(컬럼 없음, 하드 삭제 + 템플릿 삭제 시 필드 cascade).
 - `RawImportRow.rawJson`은 원본 행 데이터(**절대 삭제 금지**).
 
 ## 5. AppSetting (설정/기능 토글)
@@ -100,6 +108,10 @@ document.specPath / document.specName
 features.semiAutoDispatch = true   ← 기본 유일 ON
 features.runLog / vehicleExpiry / autoSettlement / excelImport / dashboardAlert / smsNotify = false
 sms.gatewayUrl / sms.apiKey
+douzone.endpointUrl / douzone.apiKey
+email.gatewayUrl / email.apiKey / email.from
+pwa.name / pwa.shortName / pwa.themeColor / pwa.backgroundColor / pwa.iconPath / pwa.iconUpdatedAt
+rbac.overrides (= "{}", SA 전용 /api/rbac로만 변경)
 ```
 
 > 설정 저장(PUT /api/settings, saveSettings)은 `DEFAULT_SETTINGS` 키 **whitelist**만 수용합니다.
@@ -122,4 +134,6 @@ npx prisma generate    # dev 서버 중지 후 (EPERM 방지)
 # 3) 회귀: npx tsc --noEmit / 스모크
 ```
 
-> 대량·파괴적 변경은 `db/migrations`(마이그레이션 파일) 활용 검토.
+> `prisma/migrations/0_baseline` 기준선 생성됨(데이터 무손실 `migrate resolve` 방식). 이후 스키마 변경은 `npm run db:migrate`로 증분 마이그레이션.
+>
+> 추가 모델: `LoginAttempt`(로그인 실패 잠금), `AuditLog.prevHash/entryHash`(무결성 체인).
