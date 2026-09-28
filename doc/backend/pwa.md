@@ -50,3 +50,8 @@ pwa.iconPath / pwa.iconUpdatedAt
 - [ ] `/manifest.webmanifest`에 8+1 아이콘 + 설정 색상 포함
 - [ ] 브라우저 "앱 설치" 프롬프트 노출 (`sw.js` + HTTPS + 192/512 아이콘 조건 충족)
 - [ ] TWA 빌드 시 512 아이콘 해상도 확인
+
+## 6. TWA 네이티브 빌드 (보류 — Ubuntu에서 추후 구현)
+
+- 현 상태: PWA/TWA 공용 아이콘·매니페스트·`twa-manifest.json` 뼈대까지 준비됨
+- 추후 작업: Ubuntu에 bubblewrap CLI 설치 → `twa-manifest.json` 지문/host 확정 → AAB 빌드 → Play Console 등록 + `assetlinks.json` 게시
